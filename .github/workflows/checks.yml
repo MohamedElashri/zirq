@@ -80,6 +80,8 @@ jobs:
         with:
           ref: ${{ needs.checks.outputs.commit }}
           persist-credentials: false
+      - name: Select the active Xcode macOS SDK
+        run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
       - name: Build, test and verify release assets
         run: make ci JOBS=2
       - name: Retain release assets
