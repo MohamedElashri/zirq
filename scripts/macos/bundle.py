@@ -266,6 +266,8 @@ def main():
                 shutil.copy2(library, app / "Contents/Frameworks" / library.name)
     for name in ("kwi", "knotifications6", "locale", "licenses"):
         copy_tree(prefix / "share" / name, resources / name)
+    # Upstream leaves application license installation to the packager.
+    copy_tree(ROOT / "LICENSES", resources / "licenses/zirq")
     for notice in sorted((prefix / "share/icu").glob("*/LICENSE")):
         target = resources / "licenses/icu" / notice.parent.name / "LICENSE"
         target.parent.mkdir(parents=True, exist_ok=True)

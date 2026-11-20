@@ -18,15 +18,20 @@ SettingsPage {
     required property AppSettings appSettings
     required property ColorSchemeModel terminalPalettes
     property bool showWindowSettings: true
+    property Kirigami.Action autoHideTabBarAction: null
 
     objectName: "appearanceSettings"
     title: KI18n.i18nc("@title:window", "Appearance")
     defaultsVisible: true
-    defaultsEnabled: root.appSettings.canResetAppearance
+    defaultsEnabled: root.appSettings.canResetAppearance || (root.showWindowSettings && WindowColorSchemes.currentIndex > 0)
 
     onRestoreDefaultsRequested: {
         root.appSettings.resetAppearanceDefaults();
         root.appSettings.save();
+
+        if (root.showWindowSettings) {
+            WindowColorSchemes.currentIndex = 0;
+        }
     }
 
     header: Kirigami.InlineMessage {
@@ -134,7 +139,23 @@ SettingsPage {
             title: KI18n.i18nc("@title:group", "Colors")
 
             Forms.FormEntry {
-                title: KI18n.i18nc("@label:listbox", "Color scheme:")
+                title: KI18n.i18nc("@label:listbox", "Window:")
+                visible: root.showWindowSettings
+
+                contentItem: Controls.ComboBox {
+                    objectName: "windowColorSchemeSelector"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Layout.maximumWidth: colorSchemeSelector.width
+                    textRole: "display"
+                    model: root.showWindowSettings ? WindowColorSchemes.model : null
+                    currentIndex: root.showWindowSettings ? WindowColorSchemes.currentIndex : -1
+                    onActivated: index => WindowColorSchemes.currentIndex = index
+                }
+            }
+
+            Forms.FormEntry {
+                title: KI18n.i18nc("@label:listbox", "Terminal:")
                 enabled: !root.appSettings.isColorSchemeImmutable
 
                 contentItem: RowLayout {
@@ -293,6 +314,34 @@ SettingsPage {
                         root.appSettings.tabBarAtBottom = index === 1;
                         root.appSettings.save();
                     }
+                }
+            }
+
+            Forms.FormEntry {
+                contentItem: Controls.CheckBox {
+                    objectName: "autoHideTabBarSetting"
+                    Layout.fillWidth: true
+                    text: KI18n.i18nc("@option:check", "Hide for single tabs")
+                    enabled: !root.appSettings.isAutoHideTabBarImmutable
+                    checked: root.appSettings.autoHideTabBar
+
+                    onToggled: {
+                        root.appSettings.autoHideTabBar = checked;
+                        root.appSettings.save();
+                    }
+                }
+            }
+
+            Forms.FormEntry {
+                visible: root.appSettings.autoHideTabBar
+
+                contentItem: Kirigami.InlineMessage {
+                    objectName: "hiddenTabBarMessage"
+                    Layout.fillWidth: true
+                    visible: true
+                    type: Kirigami.MessageType.Information
+                    readonly property string shortcut: root.autoHideTabBarAction ? root.autoHideTabBarAction.shortcut : ""
+                    text: shortcut.length > 0 ? KI18n.i18nc("@info", "A hidden tab bar can be brought back with %1, or you can access application settings from the context menu.", shortcut) : KI18n.i18nc("@info", "You can access application settings from the context menu.")
                 }
             }
 

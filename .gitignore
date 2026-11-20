@@ -1,8 +1,10 @@
+# Ignore the following files
+*.kate-swp
+*.user
 /build*/
 /plan.md
 !/AGENTS.md
 /.DS_Store
 /.clang-format
-*.user
-*.kate-swp
 __pycache__/
+/compile_commands.json

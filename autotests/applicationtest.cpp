@@ -10,7 +10,6 @@
 #include "settings/TerminalPaletteModel.h"
 #include "settings/TerminalPresets.h"
 #include "settings/TerminalSettings.h"
-#include "ui/AppShortcuts.h"
 
 #include <KLocalizedString>
 #include <KirigamiAppDefaults>
@@ -66,14 +65,14 @@ public:
     {
         return presets.savePreset(
             QStringLiteral("Test shell"),
-            {.command = {QStringLiteral("/bin/sh"), QStringLiteral("-i")}, .environment = {QStringLiteral("ENV="), QStringLiteral("BASH_ENV=")}});
+            {.command = {QStringLiteral("/bin/sh"), QStringLiteral("-i")},
+             .environment = {QStringLiteral("ENV="), QStringLiteral("BASH_ENV="), QStringLiteral("PS1=KWI_TEST_PROMPT> ")}});
     }
 
     TerminalSettings settings;
     TerminalPresets presets{&settings};
-    AppShortcuts shortcuts;
     TerminalPaletteModel palettes{&settings};
-    WindowManager windows{&settings, &presets, &shortcuts, &palettes};
+    WindowManager windows{&settings, &presets, &palettes};
 };
 }
 
@@ -134,6 +133,10 @@ void ApplicationTest::keyboardTabsAndSearch()
         const auto *active = qobject_cast<TerminalView *>(window->activeFocusItem());
         return active && active->session() == second.data();
     })());
+    // A shared QML engine can present the tab before its shell finishes startup.
+    // Closing an unobserved foreground process correctly asks for confirmation.
+    QTRY_VERIFY(second->historyText().contains(QStringLiteral("KWI_TEST_PROMPT>")));
+    QTRY_VERIFY((second->refreshProcessInfo(), !second->isBusy()));
     QSignalSpy confirmation{sessions, &SessionModel::closeConfirmationRequested};
     QTest::keyClick(window, Qt::Key_W, applicationModifiers);
     QTRY_VERIFY2(sessions->count() == 1,

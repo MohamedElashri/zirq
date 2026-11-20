@@ -8,24 +8,26 @@
 
 namespace GhosttyQt::Quick
 {
-FontMetrics fontMetrics(const QFont &font, qreal devicePixelRatio, qreal logicalDpi)
+FontMetrics fontMetrics(const QFont &font, qreal devicePixelRatio)
 {
     const qreal dpr{qMax(qreal(0.25), devicePixelRatio)};
+    const QFontMetricsF logicalMetrics{font};
+    const qreal pixels{font.pixelSize() > 0 ? font.pixelSize() : qMax(qreal(1), font.pointSizeF()) * logicalMetrics.fontDpi() / 72};
     FontMetrics result;
+    // Keep the grid independent of screen scale. Rasterize text at the target resolution.
+    result.cellSize = QSize(qMax(1, qRound(logicalMetrics.horizontalAdvance(QLatin1Char('M')))), qMax(1, qRound(logicalMetrics.lineSpacing())));
     result.pixelFont = font;
-    const qreal pixels{font.pixelSize() > 0 ? font.pixelSize() * dpr : qMax(qreal(1), font.pointSizeF()) * logicalDpi * dpr / 72};
-    result.pixelFont.setPixelSize(qMax(1, qRound(pixels)));
+    result.pixelFont.setPixelSize(qMax(1, qRound(pixels * dpr)));
     const QFontMetricsF fm{result.pixelFont};
-    // Include leading and center the font in a whole physical-pixel row.
     const qreal lineHeight{fm.lineSpacing()};
-    const int cellHeight{qMax(1, qRound(lineHeight))};
-    const qreal baselineFromBottom{fm.descent() + fm.leading() / 2 - (cellHeight - lineHeight) / 2};
-    result.cellSize = QSizeF(qMax(1, qRound(fm.horizontalAdvance(QLatin1Char('M')))), cellHeight) / dpr;
+    const qreal cellHeight{result.cellSize.height() * dpr};
     // Nerd Font single-cell icons balance cap height with the full font height.
-    result.iconHeight = qMin(qreal(cellHeight), (2 * fm.capHeight() + lineHeight) / 3) / dpr;
-    result.baseline = (cellHeight - qRound(baselineFromBottom)) / dpr;
+    result.iconHeight = qMin(cellHeight, (2 * fm.capHeight() + lineHeight) / 3) / dpr;
+    // Vertically center text in its row - pixel alignment for fractional is done later at
+    // glyph placement time.
+    result.baseline = (fm.ascent() + (cellHeight - fm.height()) / 2) / dpr;
     result.strokeWidth = qMax(qreal(1), std::round(fm.lineWidth())) / dpr;
-    result.underlinePosition = qMin(result.cellSize.height() - result.strokeWidth, std::round(result.baseline * dpr + fm.underlinePos()) / dpr);
+    result.underlinePosition = qMin(std::floor(cellHeight) / dpr - result.strokeWidth, std::round(result.baseline * dpr + fm.underlinePos()) / dpr);
     result.strikePosition = std::round(result.baseline * dpr - fm.strikeOutPos()) / dpr;
 
     return result;

@@ -453,6 +453,7 @@ public:
             || frame.selectionForeground != selectionForeground || frame.selectionBackground != selectionBackground;
         ++frame.generation;
         frame.columns = cols;
+        frame.cellPixels = cellPixels;
         frame.rows.resize(height);
         frame.rowWrapped.resize(height);
         frame.rowVersions.resize(height);
@@ -1398,6 +1399,14 @@ bool Terminal::selectionGesture(const SelectionEvent &input)
     }
 
     return d->setSelection(result == GHOSTTY_SUCCESS ? &selection : nullptr, viewportChanged);
+}
+
+bool Terminal::canExtendSelectionGesture() const
+{
+    d->assertThread();
+    GhosttyGridRef anchor{};
+
+    return hasSelection() && ghostty_selection_gesture_get(d->gesture, d->terminal, GHOSTTY_SELECTION_GESTURE_DATA_ANCHOR, &anchor) == GHOSTTY_SUCCESS;
 }
 
 bool Terminal::selectionAutoscroll() const

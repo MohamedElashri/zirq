@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Eike Hein <hein@kde.org>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "Frame.h"
 #include "ProcessTestSupport.h"
 #include "Session.h"
 #include "TerminalView.h"
@@ -41,6 +42,7 @@
 #include <QTest>
 #include <QUrl>
 #include <QWheelEvent>
+#include <QtMath>
 #include <QtQuickTest/quicktest.h>
 
 using namespace Kwi;
@@ -161,6 +163,12 @@ private Q_SLOTS:
     void tabStaysInTerminal();
     void applicationCursorAndKeypad();
     void contextMenuDoesNotSendInput();
+    void historyScrollOperations_data();
+    void historyScrollOperations();
+    void scrollKeysReachChild_data();
+    void scrollKeysReachChild();
+    void modifiedArrowsReachChild();
+    void selectionKeepsShiftArrows();
     void confirmsAndSanitizesPaste();
     void reportsMouseAndHover();
     void reportsMouseTrackingModes_data();
@@ -174,6 +182,11 @@ private Q_SLOTS:
     void rectangularSelectionOverridesMouseReporting();
     void readOnlyBlocksInputButRepliesToTerminalQueries();
     void copyOnSelectIsOptIn();
+    void shiftClickExtendsSelection_data();
+    void shiftClickExtendsSelection();
+    void shiftClickAfterScrolling();
+    void shiftClickWithoutAnchor_data();
+    void shiftClickWithoutAnchor();
     void keyboardSelectionDoesNotSendInput();
 };
 
@@ -239,6 +252,131 @@ void TerminalInputTest::contextMenuDoesNotSendInput()
     fixture.key(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier, QString(QChar(3)));
     fixture.key(QEvent::KeyRelease, Qt::Key_C, Qt::ControlModifier, QString(QChar(3)));
     QTRY_COMPARE(fixture.captured(), QByteArray("\x1b[99;5u\x1b[99;5:3u"));
+}
+
+void TerminalInputTest::historyScrollOperations_data()
+{
+    QTest::addColumn<bool>("history");
+    QTest::addColumn<bool>("readOnly");
+    QTest::newRow("history") << true << false;
+    QTest::newRow("history-read-only") << true << true;
+    QTest::newRow("no-history") << false << false;
+    QTest::newRow("no-history-read-only") << false << true;
+}
+
+// Line and page scrolling stays within the scrollback.
+void TerminalInputTest::historyScrollOperations()
+{
+    QFETCH(bool, history);
+    QFETCH(bool, readOnly);
+    InputFixture fixture;
+    QVERIFY(fixture.start());
+
+    if (history) {
+        fixture.session.feed(QByteArray("line\r\n").repeated(200));
+        QTRY_VERIFY(fixture.view.scrollSize() < 1);
+    }
+
+    fixture.session.setReadOnly(readOnly);
+    fixture.session.feed("\x1b[>3u");
+    GhosttyQt::Frame frame;
+    QVERIFY(fixture.session.snapshot(frame));
+    const qint64 bottom{qint64(frame.scrollTotal - frame.rows.size())};
+    const qint64 page{frame.rows.size() - 1};
+    const auto position = [&fixture] {
+        return qRound64(fixture.view.scrollPosition() / fixture.view.scrollStepSize());
+    };
+    fixture.view.scrollLines(-1);
+    QTRY_COMPARE(position(), qMax(qint64{0}, bottom - 1));
+    fixture.view.scrollLines(1);
+    QTRY_COMPARE(position(), bottom);
+    fixture.view.scrollPages(-1);
+    QTRY_COMPARE(position(), qMax(qint64{0}, bottom - page));
+    fixture.view.scrollPages(1);
+    QTRY_COMPARE(position(), bottom);
+
+    fixture.view.scrollTo(0);
+    fixture.view.scrollLines(-1);
+    fixture.view.scrollPages(-1);
+    QTRY_COMPARE(position(), 0);
+    fixture.view.scrollTo(1);
+    fixture.view.scrollLines(1);
+    fixture.view.scrollPages(1);
+    QTRY_COMPARE(position(), bottom);
+    fixture.session.feed("\x1b[5n");
+    QTRY_COMPARE(fixture.captured(), QByteArray("\x1b[0n"));
+}
+
+void TerminalInputTest::scrollKeysReachChild_data()
+{
+    QTest::addColumn<bool>("kitty");
+    QTest::addColumn<bool>("alternateScreen");
+    QTest::newRow("normal-legacy") << false << false;
+    QTest::newRow("normal-kitty") << true << false;
+    QTest::newRow("alternate-legacy") << false << true;
+    QTest::newRow("alternate-kitty") << true << true;
+}
+
+// Shifted arrow and page keys are sent to the terminal process.
+void TerminalInputTest::scrollKeysReachChild()
+{
+    QFETCH(bool, kitty);
+    QFETCH(bool, alternateScreen);
+    InputFixture fixture;
+    QVERIFY(fixture.start());
+
+    if (alternateScreen) {
+        fixture.session.feed("\x1b[?1049h");
+    }
+
+    if (kitty) {
+        fixture.session.feed("\x1b[>3u");
+    }
+
+    for (const auto key : {Qt::Key_Up, Qt::Key_Down, Qt::Key_PageUp, Qt::Key_PageDown}) {
+        fixture.key(QEvent::KeyPress, key, Qt::ShiftModifier);
+        fixture.key(QEvent::KeyRelease, key, Qt::ShiftModifier);
+    }
+
+    const QByteArray expected{kitty ? "\x1b[1;2:1A\x1b[1;2:3A\x1b[1;2:1B\x1b[1;2:3B\x1b[5;2~\x1b[5;2:3~\x1b[6;2~\x1b[6;2:3~"
+                                    : "\x1b[1;2A\x1b[1;2B\x1b[5;2~\x1b[6;2~"};
+    QTRY_COMPARE(fixture.captured(), expected);
+}
+
+// Unmodified arrows and arrows with Ctrl or Alt still act as terminal input on the normal screen.
+void TerminalInputTest::modifiedArrowsReachChild()
+{
+    InputFixture fixture;
+    QVERIFY(fixture.start());
+
+    for (const Qt::KeyboardModifiers modifiers : {Qt::KeyboardModifiers{}, Qt::ShiftModifier | Qt::ControlModifier, Qt::ShiftModifier | Qt::AltModifier}) {
+        for (const auto key : {Qt::Key_Up, Qt::Key_Down}) {
+            fixture.key(QEvent::KeyPress, key, modifiers);
+            fixture.key(QEvent::KeyRelease, key, modifiers);
+        }
+    }
+
+    QTRY_COMPARE(fixture.captured(), QByteArray("\x1b[A\x1b[B\x1b[1;6A\x1b[1;6B\x1b[1;4A\x1b[1;4B"));
+}
+
+// Shifted arrows extend the selection while keyboard selection mode is active.
+void TerminalInputTest::selectionKeepsShiftArrows()
+{
+    InputFixture fixture;
+    QVERIFY(fixture.start());
+    fixture.session.feed("\x1b[2J\x1b[Halpha\r\nbeta");
+    QVERIFY(QQuickTest::qWaitForPolish(&fixture.view));
+    fixture.view.setKeyboardSelectionMode(true);
+    fixture.key(QEvent::KeyPress, Qt::Key_Home, Qt::NoModifier);
+    QCOMPARE(fixture.view.selectedText(), QStringLiteral("b"));
+    fixture.key(QEvent::KeyPress, Qt::Key_Up, Qt::ShiftModifier);
+    fixture.key(QEvent::KeyRelease, Qt::Key_Up, Qt::ShiftModifier);
+    QCOMPARE(fixture.view.selectedText(), QStringLiteral("alpha\nb"));
+    fixture.key(QEvent::KeyPress, Qt::Key_Down, Qt::ShiftModifier);
+    fixture.key(QEvent::KeyRelease, Qt::Key_Down, Qt::ShiftModifier);
+    QCOMPARE(fixture.view.selectedText(), QStringLiteral("b"));
+    fixture.session.feed("\x1b[5n");
+    QTRY_COMPARE(fixture.captured(), QByteArray("\x1b[0n"));
 }
 
 // Multiline clipboard paste requests confirmation and removes unsafe controls before bracketed delivery.
@@ -516,6 +654,132 @@ void TerminalInputTest::copyOnSelectIsOptIn()
     select(6, 9);
     QCOMPARE(fixture.view.selectedText(), QStringLiteral("beta"));
     QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("beta"));
+}
+
+void TerminalInputTest::shiftClickExtendsSelection_data()
+{
+    QTest::addColumn<bool>("reverse");
+    QTest::addColumn<bool>("mouseTracking");
+    QTest::newRow("forward") << false << false;
+    QTest::newRow("reverse") << true << false;
+    QTest::newRow("mouse-tracking-forward") << false << true;
+    QTest::newRow("mouse-tracking-reverse") << true << true;
+}
+
+// Shift-click resumes a mouse selection and publishes the extended text only on release.
+void TerminalInputTest::shiftClickExtendsSelection()
+{
+    QFETCH(bool, reverse);
+    QFETCH(bool, mouseTracking);
+    InputFixture fixture;
+    QVERIFY(fixture.start());
+    fixture.session.feed("\x1b[2J\x1b[H0123456789");
+
+    if (mouseTracking) {
+        fixture.session.feed("\x1b[?1000h\x1b[?1006h");
+    }
+
+    QVERIFY(QQuickTest::qWaitForPolish(&fixture.view));
+    QVERIFY(fixture.view.setProperty("copyOnSelect", true));
+    const auto modifiers{mouseTracking ? Qt::ShiftModifier : Qt::NoModifier};
+    const QPoint start{fixture.position(reverse ? 7.9 : 1.1, 0.5).toPoint()};
+    const QPoint end{fixture.position(reverse ? 5.1 : 3.9, 0.5).toPoint()};
+    QTest::mousePress(&fixture.window, Qt::LeftButton, modifiers, start);
+    QTest::mouseMove(&fixture.window, end);
+    QTest::mouseRelease(&fixture.window, Qt::LeftButton, modifiers, end);
+    const QString initial{reverse ? QStringLiteral("567") : QStringLiteral("123")};
+    QCOMPARE(fixture.view.selectedText(), initial);
+    QCOMPARE(QGuiApplication::clipboard()->text(), initial);
+
+    const QPoint extended{fixture.position(reverse ? 2.1 : 6.9, 0.5).toPoint()};
+    QTest::mousePress(&fixture.window, Qt::LeftButton, Qt::ShiftModifier, extended);
+    QCOMPARE(fixture.view.selectedText(), reverse ? QStringLiteral("234567") : QStringLiteral("123456"));
+    QCOMPARE(QGuiApplication::clipboard()->text(), initial);
+    const QPoint dragged{fixture.position(reverse ? 0.1 : 8.9, 0.5).toPoint()};
+    QTest::mouseMove(&fixture.window, dragged);
+    const QString result{reverse ? QStringLiteral("01234567") : QStringLiteral("12345678")};
+    QCOMPARE(fixture.view.selectedText(), result);
+    QTest::mouseRelease(&fixture.window, Qt::LeftButton, Qt::ShiftModifier, dragged);
+    QCOMPARE(QGuiApplication::clipboard()->text(), result);
+    fixture.session.feed("\x1b[5n");
+    QTRY_COMPARE(fixture.captured(), QByteArray("\x1b[0n"));
+}
+
+// Shift-click extends from the original content after output and scrolling move it out of view.
+void TerminalInputTest::shiftClickAfterScrolling()
+{
+    InputFixture fixture;
+    QVERIFY(QTest::qWaitForWindowExposed(&fixture.window));
+    QVERIFY(QQuickTest::qWaitForPolish(&fixture.view));
+    fixture.session.feed("anchor text");
+    QVERIFY(QQuickTest::qWaitForPolish(&fixture.view));
+    QTest::mousePress(&fixture.window, Qt::LeftButton, Qt::NoModifier, fixture.position(0.1, 0.5).toPoint());
+    QTest::mouseMove(&fixture.window, fixture.position(5.9, 0.5).toPoint());
+    QTest::mouseRelease(&fixture.window, Qt::LeftButton, Qt::NoModifier, fixture.position(5.9, 0.5).toPoint());
+    QCOMPARE(fixture.view.selectedText(), QStringLiteral("anchor"));
+    fixture.session.feed(QByteArray("\r\nmore text").repeated(100));
+    fixture.view.scrollTo(0);
+    QVERIFY(QQuickTest::qWaitForPolish(&fixture.view));
+    QCOMPARE(fixture.view.selectedText(), QStringLiteral("anchor"));
+    fixture.view.scrollHistory({}, {0, -120});
+    QVERIFY(QQuickTest::qWaitForPolish(&fixture.view));
+    QVERIFY(fixture.view.scrollPosition() > 0);
+    const QPoint end{fixture.position(8.9, 0.5).toPoint()};
+    QTest::mouseClick(&fixture.window, Qt::LeftButton, Qt::ShiftModifier, end);
+    const QString selected{fixture.view.selectedText()};
+    QVERIFY(selected.startsWith(QStringLiteral("anchor text\nmore text")));
+    QVERIFY(selected.endsWith(QStringLiteral("more text")));
+    const qreal position{fixture.view.scrollPosition()};
+    QVERIFY(QQuickTest::qWaitForPolish(&fixture.view));
+    QCOMPARE(fixture.view.scrollPosition(), position);
+}
+
+void TerminalInputTest::shiftClickWithoutAnchor_data()
+{
+    QTest::addColumn<int>("change");
+    QTest::newRow("clear") << 0;
+    QTest::newRow("select-all") << 1;
+    QTest::newRow("reset") << 2;
+    QTest::newRow("alternate-screen") << 3;
+}
+
+// Clearing, replacing or resetting a selection makes Shift-click start a new gesture.
+void TerminalInputTest::shiftClickWithoutAnchor()
+{
+    QFETCH(int, change);
+    InputFixture fixture;
+    QVERIFY(QTest::qWaitForWindowExposed(&fixture.window));
+    QVERIFY(QQuickTest::qWaitForPolish(&fixture.view));
+    fixture.session.feed("0123456789");
+    QVERIFY(QQuickTest::qWaitForPolish(&fixture.view));
+    QTest::mousePress(&fixture.window, Qt::LeftButton, Qt::NoModifier, fixture.position(0.1, 0.5).toPoint());
+    QTest::mouseMove(&fixture.window, fixture.position(2.9, 0.5).toPoint());
+    QTest::mouseRelease(&fixture.window, Qt::LeftButton, Qt::NoModifier, fixture.position(2.9, 0.5).toPoint());
+    QCOMPARE(fixture.view.selectedText(), QStringLiteral("012"));
+
+    switch (change) {
+    case 0:
+        fixture.view.clearSearch();
+        break;
+    case 1:
+        fixture.view.selectAll();
+        break;
+    case 2:
+        fixture.session.feed(
+            "\x1b"
+            "c0123456789");
+        break;
+    case 3:
+        fixture.session.feed("\x1b[?1049h\x1b[H0123456789");
+        break;
+    }
+
+    QVERIFY(QQuickTest::qWaitForPolish(&fixture.view));
+    QTest::mousePress(&fixture.window, Qt::LeftButton, Qt::ShiftModifier, fixture.position(5.1, 0.5).toPoint());
+    QVERIFY(!fixture.view.hasSelection());
+    QTest::mouseMove(&fixture.window, fixture.position(7.9, 0.5).toPoint());
+    QTest::mouseRelease(&fixture.window, Qt::LeftButton, Qt::ShiftModifier, fixture.position(7.9, 0.5).toPoint());
+    QCOMPARE(fixture.view.selectedText(), QStringLiteral("567"));
 }
 
 // Keyboard selection handles wide cells and copying without sending keys or IME commits to the child.

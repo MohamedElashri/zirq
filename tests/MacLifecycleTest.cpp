@@ -10,7 +10,6 @@
 #include "settings/TerminalPaletteModel.h"
 #include "settings/TerminalPresets.h"
 #include "settings/TerminalSettings.h"
-#include "ui/AppShortcuts.h"
 #include <BreezeIcons>
 #include <KIconTheme>
 #include <KirigamiAppDefaults>
@@ -77,7 +76,6 @@ class MacLifecycleTest : public QObject
     Q_OBJECT
     std::unique_ptr<Kwi::TerminalSettings> m_settings;
     std::unique_ptr<Kwi::TerminalPresets> m_presets;
-    std::unique_ptr<Kwi::AppShortcuts> m_shortcuts;
     std::unique_ptr<Kwi::TerminalPaletteModel> m_palettes;
 
     bool inputEcho(QQuickWindow *window, Kwi::TerminalView *view, Kwi::TerminalSession *session, const QString &condition)
@@ -175,7 +173,6 @@ private Q_SLOTS:
         m_settings = std::make_unique<Kwi::TerminalSettings>();
         m_settings->setScrollbackLines(100000);
         m_presets = std::make_unique<Kwi::TerminalPresets>(m_settings.get());
-        m_shortcuts = std::make_unique<Kwi::AppShortcuts>();
         m_palettes = std::make_unique<Kwi::TerminalPaletteModel>(m_settings.get());
         QVERIFY(!QIcon::fromTheme(QStringLiteral("application-menu")).isNull());
     }
@@ -217,7 +214,7 @@ private Q_SLOTS:
 
     void interactionAndCloseChecks()
     {
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         QTemporaryDir directory;
         Kwi::LaunchOptions options;
         options.launch.command = QStringList{QStringLiteral("/bin/sh"), QStringLiteral("-i")};
@@ -299,7 +296,7 @@ private Q_SLOTS:
 
     void settingsSheetCanClose()
     {
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         Kwi::LaunchOptions options;
         options.launch.command = QStringList{QStringLiteral("/bin/echo"), QStringLiteral("KWI_SETTINGS")};
         options.hold = true;
@@ -325,7 +322,7 @@ private Q_SLOTS:
 
     void repeatedTabs()
     {
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         Kwi::LaunchOptions options;
         options.launch.command = QStringList{QStringLiteral("/bin/sh"), QStringLiteral("-i")};
         auto *window = windows.launch(options);
@@ -372,7 +369,7 @@ private Q_SLOTS:
 
     void lastWindowAndReopen()
     {
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         Kwi::LaunchOptions options;
         options.launch.command = QStringList{QStringLiteral("/bin/echo"), QStringLiteral("KWI_REOPEN")};
         options.hold = true;
@@ -394,7 +391,7 @@ private Q_SLOTS:
     {
         const QString fixture{QStringLiteral(KWI_TEST_WORKLOADS "/history-100000.txt")};
         QVERIFY2(QFile::exists(fixture), "Run scripts/macos/workloads.py before GUI workload checks");
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         Kwi::LaunchOptions options;
         options.launch.command = QStringList{QStringLiteral("/bin/cat"), fixture};
         options.hold = true;

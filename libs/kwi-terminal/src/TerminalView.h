@@ -10,7 +10,6 @@
 #include <QFont>
 #include <QInputMethodEvent>
 #include <QList>
-#include <QMetaObject>
 #include <QPoint>
 #include <QPointF>
 #include <QPointer>
@@ -26,7 +25,6 @@
 #include <QtQmlIntegration/qqmlintegration.h>
 #include <optional>
 
-class QScreen;
 class KDirWatch;
 class KModifierKeyInfo;
 
@@ -53,6 +51,7 @@ struct TerminalColors;
  * around this view. Use TerminalView directly when providing those controls
  * yourself. The embedding application handles context menus, link activation
  * and any required paste confirmation through the corresponding signals.
+ * It also provides shortcuts for actions such as copy, paste and history scrolling.
  */
 class KWI_TERMINAL_EXPORT TerminalView : public QQuickItem
 {
@@ -166,8 +165,9 @@ class KWI_TERMINAL_EXPORT TerminalView : public QQuickItem
     /*!
      * \qmlproperty bool TerminalView::requireCtrlForLinks
      * Whether activating a link with the left mouse button requires Ctrl. The
-     * default is true. When false, hovering a link also changes the cursor without
-     * Ctrl. Applications that use mouse tracking still receive unmodified clicks.
+     * default is true. Links are always decorated on hover. The pointer changes
+     * to a hand only while Ctrl is held. Applications that use mouse tracking
+     * still receive unmodified clicks.
      *
      * Link activation emits linkActivated(). It does not open the URL itself.
      */
@@ -180,6 +180,7 @@ class KWI_TERMINAL_EXPORT TerminalView : public QQuickItem
      * \qmlproperty string TerminalView::selectedText
      * \readonly
      * The selected terminal text, or an empty string when nothing is selected.
+     * Shift-click extends an existing mouse selection, including after scrolling.
      */
     Q_PROPERTY(QString selectedText READ selectedText NOTIFY selectionChanged)
     /*!
@@ -282,8 +283,8 @@ public:
     void setFontPointSize(qreal size);
     /*!
      * \qmlmethod size TerminalView::sizeForGrid(int columns, int rows)
-     * Returns the view size needed for \a columns and \a rows with the current
-     * font, zoom and screen scale, including padding. It does not resize the view.
+     * Returns the logical view size needed for \a columns and \a rows with the
+     * current font and zoom, including padding. It does not resize the view.
      * Fewer than two columns or one row returns an invalid size.
      */
     [[nodiscard]] Q_INVOKABLE QSizeF sizeForGrid(int columns, int rows) const;
@@ -425,6 +426,20 @@ public:
      */
     Q_INVOKABLE void scrollTo(qreal position);
     /*!
+     * \qmlmethod void TerminalView::scrollLines(int lines)
+     * Moves the viewport by \a lines, clamped to the retained history.
+     * Negative values move toward older output. This does not send input to
+     * the process and also works in read-only mode.
+     */
+    Q_INVOKABLE void scrollLines(qint64 lines);
+    /*!
+     * \qmlmethod void TerminalView::scrollPages(int pages)
+     * Moves the viewport by \a pages, with one row of overlap between pages.
+     * Negative values move toward older output. Like scrollLines(), this does
+     * not send input to the process and also works in read-only mode.
+     */
+    Q_INVOKABLE void scrollPages(int pages);
+    /*!
      * \qmlmethod void TerminalView::scrollHistory(point pixelDelta, point angleDelta, int modifiers = Qt.NoModifier)
      * Scrolls history using a wheel event's \a pixelDelta, \a angleDelta and
      * keyboard \a modifiers. Positive vertical deltas move toward older output.
@@ -524,7 +539,6 @@ private:
     void reloadColors();
     void applyColors(const TerminalColors &colors);
     void updateMetrics();
-    void watchScreen(QScreen *screen);
     void resizeTerminal();
     void updateCursorDefaults();
     void updateBlinkTimers();
@@ -536,6 +550,7 @@ private:
     bool handleSelectionKey(QKeyEvent *event);
     [[nodiscard]] QPoint glyphStart(QPoint cell) const;
     [[nodiscard]] QPoint cellAt(QPointF position) const;
+    [[nodiscard]] QPointF terminalPosition(QPointF position) const;
     [[nodiscard]] QUrl linkAtPosition(QPointF position, QRegion *cells = nullptr) const;
     bool reportMouse(QMouseEvent *event, bool release, bool motion);
     void sendMouse(GhosttyQt::MouseEvent event);
@@ -570,9 +585,6 @@ private:
     KDirWatch *m_paletteWatch;
     QTimer m_paletteReloadTimer;
     QString m_palettePath;
-
-    QMetaObject::Connection m_screenConnection;
-    QMetaObject::Connection m_dpiConnection;
 
     QUrl m_hoveredLink;
     QRegion m_highlightedLink;

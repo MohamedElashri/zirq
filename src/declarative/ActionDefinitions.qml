@@ -5,20 +5,24 @@ import QtQml
 import org.kde.ki18n
 import org.kde.kirigami.actioncollection as AC
 
-QtObject {
+AC.ActionCollectionManager {
     id: definitions
+
+    pageRow: null
     readonly property bool macOS: Qt.platform.os === "osx"
-    readonly property AC.ActionCollection tabs: AC.ActionCollection {
+    AC.ActionCollection {
         name: "org.kde.kwi.tabs"
         text: KI18n.i18nc("@title:group", "Windows and Tabs")
 
+        AC.ActionData { name: "auto_hide_tab_bar"; text: KI18n.i18nc("@action", "Hide Tab Bar for Single Tabs"); icon.name: "tab"; defaultShortcut: "Ctrl+Shift+M" }
         AC.ActionData { name: "new_window"; text: KI18n.i18nc("@action", "New Window"); icon.name: "window-new"; defaultShortcut: definitions.macOS ? "Ctrl+N" : "Ctrl+Shift+N" }
         AC.ActionData { name: "new_tab"; text: KI18n.i18nc("@action", "New Tab"); icon.name: "tab-new"; defaultShortcut: definitions.macOS ? "Ctrl+T" : "Ctrl+Shift+T" }
         AC.ActionData { name: "close_tab"; text: KI18n.i18nc("@action", "Close Tab"); icon.name: "tab-close"; defaultShortcut: definitions.macOS ? "Ctrl+W" : "Ctrl+Shift+W" }
         AC.ActionData { name: "rename_tab"; text: KI18n.i18nc("@action", "Rename Tab…"); icon.name: "edit-rename"; defaultShortcut: "Ctrl+Alt+S" }
-        AC.ActionData { name: "next_tab"; text: KI18n.i18nc("@action", "Next Tab"); icon.name: "go-next"; defaultShortcut: definitions.macOS ? "Meta+Tab" : "Ctrl+PgDown" }
-        AC.ActionData { name: "previous_tab"; text: KI18n.i18nc("@action", "Previous Tab"); icon.name: "go-previous"; defaultShortcut: definitions.macOS ? "Meta+Shift+Tab" : "Ctrl+PgUp" }
+        AC.ActionData { name: "next_tab"; text: KI18n.i18nc("@action", "Next Tab"); icon.name: "go-next"; defaultShortcut: definitions.macOS ? "Meta+Tab" : "Shift+Right"; defaultAlternateShortcut: definitions.macOS ? "" : "Ctrl+PgDown" }
+        AC.ActionData { name: "previous_tab"; text: KI18n.i18nc("@action", "Previous Tab"); icon.name: "go-previous"; defaultShortcut: definitions.macOS ? "Meta+Shift+Tab" : "Shift+Left"; defaultAlternateShortcut: definitions.macOS ? "" : "Ctrl+PgUp" }
         AC.ActionData { name: "last_used_tab"; text: KI18n.i18nc("@action", "Last Used Tab"); icon.name: "tab-duplicate"; defaultShortcut: definitions.macOS ? "" : "Ctrl+Tab" }
+        AC.ActionData { name: "last_used_tab_reverse"; text: KI18n.i18nc("@action", "Last Used Tabs (Reverse)"); icon.name: "tab-duplicate"; defaultShortcut: definitions.macOS ? "" : "Ctrl+Shift+Tab" }
         AC.ActionData { name: "move_tab_left"; text: KI18n.i18nc("@action", "Move Tab Left"); icon.name: "go-previous"; defaultShortcut: "Ctrl+Alt+Left" }
         AC.ActionData { name: "move_tab_right"; text: KI18n.i18nc("@action", "Move Tab Right"); icon.name: "go-next"; defaultShortcut: "Ctrl+Alt+Right" }
         AC.ActionData { name: "detach_tab"; text: KI18n.i18nc("@action", "Detach Tab"); icon.name: "window-new" }
@@ -34,7 +38,7 @@ QtObject {
         AC.ActionData { name: "tab_9"; text: KI18n.i18nc("@action", "Switch to Tab %1", 9); icon.name: "tab"; defaultShortcut: definitions.macOS ? "Ctrl+9" : "Alt+9" }
     }
 
-    readonly property AC.ActionCollection editing: AC.ActionCollection {
+    AC.ActionCollection {
         name: "org.kde.kwi.output"
         text: KI18n.i18nc("@title:group", "Text and Output")
 
@@ -49,6 +53,10 @@ QtObject {
         AC.ActionData { name: "find"; text: KI18n.i18nc("@action", "Find…"); icon.name: "edit-find"; defaultShortcut: definitions.macOS ? "Ctrl+F" : "Ctrl+Shift+F" }
         AC.StandardActionData { standardAction: AC.StandardActionData.FindNext }
         AC.StandardActionData { standardAction: AC.StandardActionData.FindPrev }
+        AC.ActionData { name: "scroll_line_up"; text: KI18n.i18nc("@action", "Scroll Up One Line"); icon.name: "go-up"; defaultShortcut: "Shift+Up" }
+        AC.ActionData { name: "scroll_line_down"; text: KI18n.i18nc("@action", "Scroll Down One Line"); icon.name: "go-down"; defaultShortcut: "Shift+Down" }
+        AC.ActionData { name: "scroll_page_up"; text: KI18n.i18nc("@action", "Scroll Up One Page"); icon.name: "go-up"; defaultShortcut: "Shift+PgUp" }
+        AC.ActionData { name: "scroll_page_down"; text: KI18n.i18nc("@action", "Scroll Down One Page"); icon.name: "go-down"; defaultShortcut: "Shift+PgDown" }
         AC.ActionData { name: "previous_prompt"; text: KI18n.i18nc("@action", "Previous Prompt"); icon.name: "go-up" }
         AC.ActionData { name: "next_prompt"; text: KI18n.i18nc("@action", "Next Prompt"); icon.name: "go-down" }
         AC.ActionData { name: "copy_command_output"; text: KI18n.i18nc("@action", "Copy Last Command Output"); icon.name: "edit-copy" }
@@ -59,7 +67,7 @@ QtObject {
         AC.ActionData { name: "monitor_silence"; text: KI18n.i18nc("@action", "Monitor for Silence"); icon.name: "notifications" }
     }
 
-    readonly property AC.ActionCollection application: AC.ActionCollection {
+    AC.ActionCollection {
         name: "org.kde.kwi.application"
         text: KI18n.i18nc("@title:group", "Application")
 
@@ -69,6 +77,12 @@ QtObject {
         AC.ActionData { name: "reset_zoom"; text: KI18n.i18nc("@action", "Reset Zoom"); icon.name: "zoom-original"; defaultShortcut: "Ctrl+0" }
         AC.ActionData { name: "settings"; text: KI18n.i18nc("@action", "Configure %1…", Qt.application.displayName); icon.name: "settings-configure"; defaultShortcut: definitions.macOS ? "Ctrl+," : "Ctrl+Shift+," }
         AC.StandardActionData { standardAction: AC.StandardActionData.ConfigureNotifications }
+        AC.StandardActionData { standardAction: AC.StandardActionData.AboutApp }
+        AC.StandardActionData { standardAction: AC.StandardActionData.AboutKDE }
+        AC.StandardActionData {
+            standardAction: AC.StandardActionData.ReportBug
+            onTriggered: Qt.openUrlExternally("https://github.com/MohamedElashri/zirq/issues")
+        }
         AC.ActionData { name: "menu"; text: KI18n.i18nc("@action", "Application Menu"); icon.name: "application-menu"; defaultShortcut: "Shift+F10" }
         AC.ActionData { name: "quit"; text: KI18n.i18nc("@action", "Quit"); icon.name: "window-close"; defaultShortcut: definitions.macOS ? "Ctrl+Q" : "Ctrl+Shift+Q" }
     }

@@ -9,11 +9,12 @@
 #include "settings/TerminalPaletteModel.h"
 #include "settings/TerminalPresets.h"
 #include "settings/TerminalSettings.h"
+#include "settings/WindowColorSchemes.h"
 #include "ui/AppAboutData.h"
-#include "ui/AppShortcuts.h"
 #include <ActionCollection/ActionCollection>
 #include <ActionCollection/ActionCollections>
 #include <BreezeIcons>
+#include <KColorSchemeModel>
 #include <KIconTheme>
 #include <KLocalizedString>
 #include <KirigamiAppDefaults>
@@ -55,7 +56,6 @@ class MacInteractionTest : public QObject
     QTemporaryDir m_directory;
     std::unique_ptr<Kwi::TerminalSettings> m_settings;
     std::unique_ptr<Kwi::TerminalPresets> m_presets;
-    std::unique_ptr<Kwi::AppShortcuts> m_shortcuts;
     std::unique_ptr<Kwi::TerminalPaletteModel> m_palettes;
     std::unique_ptr<Kwi::WindowManager> m_windows;
     QQuickWindow *m_window{};
@@ -149,7 +149,7 @@ class MacInteractionTest : public QObject
             "os.write(1,b'KWI_INPUT_READY\\r\\n')\n"
             "while True:\n b=os.read(0,4096)\n if not b: break\n f.write(b)\n os.write(1,b'RX:'+b.hex().encode()+b'\\r\\n')\n");
         script.close();
-        m_windows = std::make_unique<Kwi::WindowManager>(m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get());
+        m_windows = std::make_unique<Kwi::WindowManager>(m_settings.get(), m_presets.get(), m_palettes.get());
         Kwi::LaunchOptions options;
         options.launch.command = QStringList{QStringLiteral("/usr/bin/python3"), script.fileName(), m_directory.filePath(QStringLiteral("received.bin"))};
         m_window = m_windows->launch(options);
@@ -191,7 +191,6 @@ private Q_SLOTS:
         KirigamiAppDefaults::apply(qApp);
         m_settings = std::make_unique<Kwi::TerminalSettings>();
         m_presets = std::make_unique<Kwi::TerminalPresets>(m_settings.get());
-        m_shortcuts = std::make_unique<Kwi::AppShortcuts>();
         m_palettes = std::make_unique<Kwi::TerminalPaletteModel>(m_settings.get());
     }
 
@@ -375,15 +374,29 @@ private Q_SLOTS:
 
     void readmeScreenshot()
     {
+        Kwi::WindowColorSchemes windowSchemes;
+        const auto originalWindowScheme = windowSchemes.currentIndex();
+        auto *schemes = windowSchemes.model();
+        int darkScheme{-1};
+        for (int row{0}; row < schemes->rowCount(); ++row) {
+            if (schemes->index(row, 0).data(KColorSchemeModel::IdRole).toString() == QLatin1String("BreezeDark")) {
+                darkScheme = row;
+                break;
+            }
+        }
+        QVERIFY(darkScheme >= 0);
         const auto originalScheme = QGuiApplication::styleHints()->colorScheme();
         const auto originalPalette = QGuiApplication::palette();
         const auto restoreAppearance = qScopeGuard([&] {
+            windowSchemes.setCurrentIndex(originalWindowScheme);
             QGuiApplication::styleHints()->setColorScheme(originalScheme);
             QApplication::setPalette(originalPalette);
         });
         QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Dark);
-        // The desktop Kirigami style uses SystemPalette. A color-scheme hint
-        // alone does not override a light host palette in an isolated capture.
+        windowSchemes.setCurrentIndex(darkScheme);
+        QCOMPARE(windowSchemes.currentIndex(), darkScheme);
+        // Pair the Kirigami scheme with deterministic native-control colors
+        // rather than inheriting the host palette in this isolated capture.
         QPalette dark{originalPalette};
         for (auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText, QPalette::ToolTipText})
             dark.setColor(role, QColor{QStringLiteral("#e6eeec")});
@@ -433,8 +446,11 @@ private Q_SLOTS:
         m_session->feed("  \033[38;2;114;230;196m>\033[0m ");
         QTRY_VERIFY(m_session->historyText().contains(QStringLiteral("مرحباً بالعالم")));
         QTest::qWait(400);
-        QVERIFY(m_window->grabWindow().pixelColor(4, 4).lightness() < 100);
         screenshot(QStringLiteral("readme"));
+        const auto chrome = m_window->grabWindow().pixelColor(4, 4);
+        QVERIFY2(chrome.lightness() < 100,
+                 qPrintable(QStringLiteral("Chrome %1, application window palette %2")
+                                .arg(chrome.name(), QApplication::palette().color(QPalette::Window).name())));
     }
 
     void commandFindSettingsZoomAndFullscreen()
@@ -903,7 +919,7 @@ private Q_SLOTS:
             QVERIFY(measureOption(
                 name,
                 [&] {
-                    return call(dialog, "open");
+                    return trigger(name == QLatin1String("aboutDialog") ? QStringLiteral("aboutAction") : QStringLiteral("aboutKdeAction"));
                 },
                 surface));
             QVERIFY(surface());
@@ -1184,6 +1200,16 @@ private Q_SLOTS:
 
     void customShortcutPersistsAndResets()
     {
+        auto *shared = KirigamiActions::ActionCollections::self()->collection(QStringLiteral("org.kde.globalactions"));
+        auto *application = KirigamiActions::ActionCollections::self()->collection(QStringLiteral("org.kde.kwi.application"));
+        QVERIFY(shared && application);
+        QVERIFY(shared->action(KStandardActions::KeyBindings));
+        QVERIFY(shared->action(QStringLiteral("FindAction")));
+        QVERIFY(!shared->action(KStandardActions::Preferences));
+        QVERIFY(!shared->action(KStandardActions::AboutApp));
+        QVERIFY(application->action(QStringLiteral("settings")));
+        QVERIFY(application->action(KStandardActions::AboutApp));
+
         QQmlEngine engine;
         QQmlComponent component{&engine};
         component.setData("import org.kde.kirigami.actioncollection as AC\nAC.ActionModel { collectionName: 'org.kde.kwi.tabs' }", QUrl{});
@@ -1385,7 +1411,10 @@ int main(int argc, char **argv)
         QCoreApplication::setApplicationName(argc == 4 ? QStringLiteral("kwi") : QStringLiteral("zirq"));
         KConfig::setMainConfigName(QStringLiteral("kwirc"));
         KirigamiAppDefaults::apply(qApp);
-        Kwi::AppShortcuts shortcuts;
+        Kwi::TerminalSettings settings;
+        Kwi::TerminalPresets presets{&settings};
+        Kwi::TerminalPaletteModel palettes{&settings};
+        Kwi::WindowManager windows{&settings, &presets, &palettes};
         auto *collection = KirigamiActions::ActionCollections::self()->collection(QStringLiteral("org.kde.kwi.tabs"));
         auto *action = collection ? collection->action(QStringLiteral("new_tab")) : nullptr;
         if (argc == 4) {

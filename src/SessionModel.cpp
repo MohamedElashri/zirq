@@ -10,6 +10,7 @@
 #include "settings/TerminalSettings.h"
 
 #include <QDir>
+#include <QGuiApplication>
 #include <QTimer>
 #include <memory>
 #include <utility>
@@ -21,6 +22,11 @@ SessionModel::SessionModel(TerminalSettings *settings, TerminalPresets *presets,
     , m_settings{settings}
     , m_presets{presets}
 {
+    connect(this, &SessionModel::currentIndexChanged, this, [this] {
+        if (auto *session = currentSession()) {
+            session->setUnreadOutput(false);
+        }
+    });
 }
 
 int SessionModel::rowCount(const QModelIndex &parent) const
@@ -54,7 +60,13 @@ int SessionModel::currentIndex() const
 
 void SessionModel::setCurrentIndex(int index)
 {
-    if (index < 0 || index >= count() || m_currentIndex == index) {
+    if (index < 0 || index >= count()) {
+        return;
+    }
+
+    finishHistoryTraversal();
+
+    if (m_currentIndex == index) {
         return;
     }
 
@@ -127,6 +139,7 @@ void SessionModel::adoptSession(TerminalSession *session, int index)
         return;
     }
 
+    finishHistoryTraversal();
     session->setParent(this);
     const auto *current = currentSession();
     const int row{index < 0 ? m_currentIndex + 1 : qMin(index, count())};
@@ -139,6 +152,10 @@ void SessionModel::adoptSession(TerminalSession *session, int index)
         if (!session->holdOpen() && session->state() != Session::State::Failed) {
             removeSession(session);
         }
+    });
+
+    connect(session, &Session::outputReceived, this, [this, session] {
+        session->setUnreadOutput(session != currentSession());
     });
 
     Q_EMIT countChanged();
@@ -200,9 +217,33 @@ void SessionModel::moveSession(int from, int to)
     Q_EMIT currentIndexChanged();
 }
 
-void SessionModel::activateLastUsed()
+void SessionModel::activateLastUsed(bool reverse)
 {
-    setCurrentIndex(m_sessions.indexOf(m_activationHistory.value(1)));
+    const int size{static_cast<int>(m_activationHistory.size())};
+
+    if (size < 2) {
+        return;
+    }
+
+    // Keep recent-use order until the navigation modifiers are released.
+    m_historyIndex = (qMax(0, m_historyIndex) + (reverse ? size - 1 : 1)) % size;
+    m_currentIndex = m_sessions.indexOf(m_activationHistory.at(m_historyIndex));
+
+    if (QGuiApplication::keyboardModifiers() == Qt::NoModifier) {
+        finishHistoryTraversal();
+    }
+
+    Q_EMIT currentIndexChanged();
+}
+
+void SessionModel::finishHistoryTraversal()
+{
+    if (m_historyIndex < 0) {
+        return;
+    }
+
+    auto *session = m_activationHistory.takeAt(std::exchange(m_historyIndex, -1));
+    m_activationHistory.prepend(session);
 }
 
 void SessionModel::confirmClose(quint64 requestId, bool doNotAskAgain)
@@ -339,6 +380,8 @@ void SessionModel::eraseSession(TerminalSession *session)
         return;
     }
 
+    finishHistoryTraversal();
+
     if (m_pendingClose && m_pendingClose->scope == CloseScope::Session && m_pendingClose->session == session) {
         cancelClose();
     }
@@ -349,7 +392,7 @@ void SessionModel::eraseSession(TerminalSession *session)
     m_activationHistory.removeOne(session);
     m_currentIndex = m_sessions.indexOf(current == session ? m_activationHistory.value(0) : current);
     endRemoveRows();
-    disconnect(session, &TerminalSession::exited, this, nullptr);
+    disconnect(session, nullptr, this, nullptr);
 
     Q_EMIT sessionRemoved(session);
     Q_EMIT countChanged();

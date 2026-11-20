@@ -379,15 +379,20 @@ void Session::setState(State newState)
     }
 }
 
-void Session::finish(int code)
+void Session::finish(int code, QProcess::ExitStatus status)
 {
     if (isFinished()) {
         return;
     }
 
-    const State result{!m_started && !m_error.isEmpty() ? State::Failed : State::Exited};
+    const bool crashed{status == QProcess::CrashExit && !m_closeRequested};
+    const State result{crashed || (!m_started && !m_error.isEmpty()) ? State::Failed : State::Exited};
     m_exitCode = code;
     m_progress = {};
+
+    if (crashed) {
+        reportError(i18nd("kwi-terminal", "Program '%1' crashed.", m_launchedProgramName));
+    }
 
     setMonitorActivity(false);
     setMonitorSilence(false);
@@ -530,6 +535,11 @@ QString Session::sshHostName() const
     return m_sshMetadata->info().hostName;
 }
 
+QString Session::sshOriginalHostName() const
+{
+    return m_sshMetadata->info().originalHostName;
+}
+
 int Session::sshPort() const
 {
     return m_sshMetadata->info().port;
@@ -538,6 +548,11 @@ int Session::sshPort() const
 QString Session::sshRemoteCommand() const
 {
     return m_sshMetadata->info().remoteCommand;
+}
+
+bool Session::alternateScreen() const
+{
+    return m_terminal && m_terminal->isModeEnabled(GhosttyQt::Mode::AlternateScreen);
 }
 
 int Session::scrollbackLines() const
@@ -685,21 +700,12 @@ bool Session::send(const QByteArray &bytes)
 void Session::feed(const QByteArray &bytes)
 {
     const auto started{traceVerbose() ? traceTime() : 0};
-    if (!bytes.isEmpty() && !isFinished() && !m_closeRequested) {
-        if (m_monitorSilence) {
-            m_silenceTimer.start(silenceSeconds() * 1000);
-        }
-
-        if (m_monitorActivity && (!m_lastActivity.isValid() || m_lastActivity.elapsed() >= 2000)) {
-            m_lastActivity.start();
-
-            Q_EMIT activityDetected();
-        }
-    }
+    const bool wasAlternateScreen{alternateScreen()};
 
     if (m_terminal && !m_terminal->feed(bytes)) {
         reportError(i18nd("kwi-terminal", "The terminal could not process output."));
     }
+
     if (!m_traceMarker.isEmpty() && !property("zirqTraceMarkerFed").toBool()) {
         if (advanceTraceMarker(m_traceMarkerTail, m_traceMarker, bytes))
             setProperty("zirqTraceMarkerFed", true);
@@ -711,12 +717,30 @@ void Session::feed(const QByteArray &bytes)
 
     updateProgress();
 
+    if (alternateScreen() != wasAlternateScreen) {
+        Q_EMIT alternateScreenChanged();
+    }
+
     Q_EMIT m_events.historyChanged();
 
     if (m_terminal) {
         if (const auto notification = m_terminal->takeNotification()) {
             Q_EMIT notificationRequested(notification->title, notification->body);
         }
+    }
+
+    if (!bytes.isEmpty() && !isFinished() && !m_closeRequested) {
+        if (m_monitorSilence) {
+            m_silenceTimer.start(silenceSeconds() * 1000);
+        }
+
+        if (m_monitorActivity && (!m_lastActivity.isValid() || m_lastActivity.elapsed() >= 2000)) {
+            m_lastActivity.start();
+
+            Q_EMIT activityDetected();
+        }
+
+        Q_EMIT outputReceived();
     }
 }
 
@@ -882,6 +906,7 @@ void Session::resetTerminal()
         return;
     }
 
+    const bool wasAlternateScreen{alternateScreen()};
     m_terminal->reset();
     // reset() emits an empty title update. Clear the override flag as well so
     // consumers, including accessibility, fall back to the launched program.
@@ -893,6 +918,10 @@ void Session::resetTerminal()
             return;
     }
     updateProgress();
+
+    if (alternateScreen() != wasAlternateScreen) {
+        Q_EMIT alternateScreenChanged();
+    }
 
     Q_EMIT m_events.historyChanged();
 }

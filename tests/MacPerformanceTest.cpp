@@ -15,7 +15,6 @@
 #include "settings/TerminalPaletteModel.h"
 #include "settings/TerminalPresets.h"
 #include "settings/TerminalSettings.h"
-#include "ui/AppShortcuts.h"
 #include <BreezeIcons>
 #include <KIconTheme>
 #include <KirigamiAppDefaults>
@@ -213,7 +212,6 @@ class MacPerformanceTest : public QObject
     Q_OBJECT
     std::unique_ptr<Kwi::TerminalSettings> m_settings;
     std::unique_ptr<Kwi::TerminalPresets> m_presets;
-    std::unique_ptr<Kwi::AppShortcuts> m_shortcuts;
     std::unique_ptr<Kwi::TerminalPaletteModel> m_palettes;
 
     void record(const QString &name, QJsonObject result)
@@ -231,9 +229,14 @@ class MacPerformanceTest : public QObject
 
     bool fit(QQuickWindow *window, Kwi::TerminalSession *session, int columns, int rows)
     {
-        // Test font Menlo 10 pt is 6 x 11.5 logical pixels at this Mac's 2x/72 DPI.
-        // Verify both the hardware condition and the resulting PTY grid.
-        if (window->effectiveDevicePixelRatio() != 2 || qRound(window->screen()->logicalDotsPerInch()) != 72)
+        // Keep the campaign's hardware conditions, but derive grid dimensions
+        // from the view so font-metric changes do not invalidate the fixture.
+        if (window->effectiveDevicePixelRatio() != 2 || qRound(window->screen()->logicalDotsPerInch()) != 72) {
+            qWarning() << "Performance display conditions:" << window->effectiveDevicePixelRatio() << window->screen()->logicalDotsPerInch();
+            return false;
+        }
+        auto *view = window->findChild<Kwi::TerminalView *>();
+        if (!view)
             return false;
         for (int i{0}; i < 8; ++i) {
             GhosttyQt::Frame frame;
@@ -243,11 +246,19 @@ class MacPerformanceTest : public QObject
             }
             if (frame.columns == columns && frame.rows.size() == rows)
                 return true;
-            window->resize(window->width() + (columns - frame.columns) * 6, window->height() + qRound((rows - frame.rows.size()) * 11.5));
+            const auto current = view->sizeForGrid(frame.columns, frame.rows.size());
+            const auto target = view->sizeForGrid(columns, rows);
+            window->resize(window->width() + qRound(target.width() - current.width()),
+                           window->height() + qRound(target.height() - current.height()));
             settle(100);
         }
         GhosttyQt::Frame frame;
-        return session->snapshot(frame) && frame.columns == columns && frame.rows.size() == rows;
+        const bool fitted = session->snapshot(frame) && frame.columns == columns && frame.rows.size() == rows;
+        if (!fitted) {
+            qWarning() << "Grid fit failed:" << QSize(columns, rows) << "actual" << QSize(frame.columns, int(frame.rows.size())) << "window" << window->size()
+                       << "view" << view->size() << "target" << view->sizeForGrid(columns, rows) << "screen" << window->screen()->availableGeometry();
+        }
+        return fitted;
     }
 
     Kwi::LaunchOptions command(const QStringList &arguments)
@@ -282,7 +293,6 @@ private Q_SLOTS:
         m_settings->setScrollbackLines(100000);
         m_settings->setCursorBlinking(false);
         m_presets = std::make_unique<Kwi::TerminalPresets>(m_settings.get());
-        m_shortcuts = std::make_unique<Kwi::AppShortcuts>();
         m_palettes = std::make_unique<Kwi::TerminalPaletteModel>(m_settings.get());
     }
 
@@ -294,7 +304,7 @@ private Q_SLOTS:
     void glyphCaches()
     {
         QVERIFY(Kwi::traceEnabled());
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         auto *window = windows.launch(
@@ -415,7 +425,7 @@ private Q_SLOTS:
     {
         QVERIFY(qEnvironmentVariableIsSet("KWI_PERF_BACKGROUND"));
         QVERIFY(!macTestVoiceOverEnabled());
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         QTemporaryDir directory;
         auto *window = windows.launch(command(driver(directory.path(), {QStringLiteral("--echo")})));
         QVERIFY(window && QTest::qWaitForWindowExposed(window, 10000));
@@ -496,7 +506,7 @@ private Q_SLOTS:
         const bool background = qEnvironmentVariableIsSet("KWI_PERF_BACKGROUND");
         QVERIFY2(!background || state == QLatin1String("hidden") || state == QLatin1String("minimized") || state == QLatin1String("app-hidden"),
                  "Background launch is only supported for hidden/minimized idle conditions");
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         auto options = command({QStringLiteral("/bin/sh"), QStringLiteral("-i")});
         auto *window = windows.launch(options);
         QVERIFY(window && (background ? QTest::qWaitForWindowExposed(window, 10000) : activateMacTestWindow(window, 10000)));
@@ -624,7 +634,7 @@ private Q_SLOTS:
         QAccessible::setActive(accessible);
         QTemporaryDir front, back;
         QVERIFY(front.isValid() && back.isValid());
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         auto *window = windows.launch(command(driver(front.path(), {QStringLiteral("--echo"), QStringLiteral("--seconds"), QStringLiteral("75")})));
         QVERIFY(window && activateMacTestWindow(window, 10000));
         QVERIFY(watchMacMetalTiming(window));
@@ -885,7 +895,7 @@ private Q_SLOTS:
     void retainedMemory()
     {
         QVERIFY(!Kwi::traceEnabled());
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         auto *window = windows.launch(command({QStringLiteral("/bin/sh"), QStringLiteral("-i")}));
         QVERIFY(window && activateMacTestWindow(window, 10000));
         auto *model = windows.sessions(window);
@@ -996,7 +1006,7 @@ private Q_SLOTS:
                               QStringLiteral("--rate"),
                               QString::number(rate)};
         arguments.append(images ? QStringLiteral("--keep-viewport") : QStringLiteral("--seed"));
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         auto child = driver(directory.path(), arguments);
         if (history < 0) {
             QStringList shell{
@@ -1078,7 +1088,7 @@ private Q_SLOTS:
     {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         auto options = command(driver(directory.path(),
                                       {QStringLiteral("--workload"),
                                        QStringLiteral(KWI_TEST_WORKLOADS "/history-100000.txt"),

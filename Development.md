@@ -105,7 +105,7 @@ Keep the VT grid, PTY input, copying and search in logical order. Rendering and
 pointer coordinates share visual cell maps. Make records the Ghostty patch hash
 and source manifest and rebuilds the dependency when either changes.
 
-The Mac build pins the standalone libghostty-vt 1.0.0 release and its offline
+The Mac build pins the standalone libghostty-vt 1.0.1 release and its offline
 dependency archive in `craft/ghostty-sources.json`. Keep the Craft recipe and
 `craft/release-sources.json` in sync when updating it.
 

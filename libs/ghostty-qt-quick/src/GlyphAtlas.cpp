@@ -9,13 +9,33 @@
 #include <QPen>
 #include <QQuickWindow>
 #include <QtGui/private/qrawfont_p.h>
-#include <cmath>
+#include <QtMath>
 #include <numbers>
 #include <numeric>
 #include <utility>
 
 namespace GhosttyQt::Quick
 {
+namespace
+{
+void drawPaddedImage(QPainter &painter, const QImage &image, QPoint position)
+{
+    painter.drawImage(position, image);
+
+    // Repeat edge pixels for transformed sprites that use linear filtering.
+    for (const int y : {-1, image.height()}) {
+        const int sourceY{qBound(0, y, image.height() - 1)};
+        painter.drawImage(QRect(position.x(), position.y() + y, image.width(), 1), image, QRect(0, sourceY, image.width(), 1));
+        painter.fillRect(QRect(position.x() - 1, position.y() + y, 1, 1), image.pixelColor(0, sourceY));
+        painter.fillRect(QRect(position.x() + image.width(), position.y() + y, 1, 1), image.pixelColor(image.width() - 1, sourceY));
+    }
+
+    for (const int x : {-1, image.width()}) {
+        painter.drawImage(QRect(position.x() + x, position.y(), 1, image.height()), image, QRect(qBound(0, x, image.width() - 1), 0, 1, image.height()));
+    }
+}
+}
+
 GlyphAtlas::GlyphAtlas(QQuickWindow *window, quint64 *rasterizedGlyphs, std::unique_ptr<GlyphAtlas> source)
     : m_window{window}
     , m_rasterized{rasterizedGlyphs}
@@ -57,17 +77,19 @@ GlyphImage GlyphAtlas::insert(const Key &key, const QImage &image, QPointF beari
     }
 
     std::shared_ptr<AtlasPage> page;
+    const int padding{key.kind == Kind::Font ? 0 : 1};
+    const QSize size{image.size() + QSize(2 * padding, 2 * padding)};
 
     for (auto it = m_pages.rbegin(); it != m_pages.rend(); ++it) {
         const auto &candidate = *it;
 
-        if (candidate->x + image.width() + 1 > candidate->image.width()) {
+        if (candidate->x + size.width() + 1 > candidate->image.width()) {
             candidate->y += candidate->rowHeight + 1;
             candidate->x = 1;
             candidate->rowHeight = 0;
         }
 
-        if (candidate->x + image.width() + 1 <= candidate->image.width() && candidate->y + image.height() + 1 <= candidate->image.height()) {
+        if (candidate->x + size.width() + 1 <= candidate->image.width() && candidate->y + size.height() + 1 <= candidate->image.height()) {
             page = candidate;
             break;
         }
@@ -78,20 +100,26 @@ GlyphImage GlyphAtlas::insert(const Key &key, const QImage &image, QPointF beari
 
         // Start small for ASCII sessions, then grow pages to reduce CJK texture batches.
         const int pageSize{m_pages.empty() ? 256 : 512};
-        const int size{qMax(pageSize, int(qNextPowerOfTwo(quint32(qMax(image.width(), image.height()) + 2))))};
-        page->image = QImage(size, size, QImage::Format_ARGB32_Premultiplied);
+        const int extent{qMax(pageSize, int(qNextPowerOfTwo(quint32(qMax(size.width(), size.height()) + 2))))};
+        page->image = QImage(extent, extent, QImage::Format_ARGB32_Premultiplied);
         page->image.fill(Qt::transparent);
         m_pages.push_back(page);
     }
 
-    const QRect rect(page->x, page->y, image.width(), image.height());
+    const QRect rect(page->x + padding, page->y + padding, image.width(), image.height());
     QPainter painter{&page->image};
     painter.setCompositionMode(QPainter::CompositionMode_Source);
-    painter.drawImage(rect.topLeft(), image);
+
+    if (padding) {
+        drawPaddedImage(painter, image, rect.topLeft());
+    } else {
+        painter.drawImage(rect.topLeft(), image);
+    }
+
     painter.end();
 
-    page->x += image.width() + 1;
-    page->rowHeight = qMax(page->rowHeight, image.height());
+    page->x += size.width() + 1;
+    page->rowHeight = qMax(page->rowHeight, size.height());
     page->dirty = true;
     page->lastUsed = m_frame;
     m_glyphs.insert(key, CachedGlyph{page, rect, bearing, format});
@@ -118,31 +146,27 @@ GlyphImage GlyphAtlas::glyph(const QRawFont &font, quint32 index, bool allowSubp
         return found;
     }
 
-    // CoreText bounds queries can be expensive. Do this only on an atlas miss,
-    // and reuse the result for grayscale bearings rather than querying twice.
-    const QRectF bounds{font.boundingRect(index)};
-    if (bounds.isEmpty()) {
+    // Skip empty glyphs before asking CoreText for a raster. Bearings below
+    // still need the bounding box for the actual raster format.
+    if (font.boundingRect(index).isEmpty()) {
         return {};
     }
 
     QImage source{font.alphaMapForGlyph(index, subpixel ? QRawFont::SubPixelAntialiasing : QRawFont::PixelAntialiasing)};
-    QPointF bearing;
-
-    if (subpixel) {
-        // QRawFont::boundingRect can omit the extra bearings needed for LCD filtering.
-        const auto bounds = engine->alphaMapBoundingBox(index, {}, {}, QFontEngine::Format_A32);
-        bearing = QPointF(bounds.x.truncate(), bounds.y.truncate());
-    } else {
-        bearing = QPointF(std::floor(bounds.left()), std::floor(bounds.top()));
-    }
+    const bool colored = source.format() == QImage::Format_ARGB32_Premultiplied || source.format() == QImage::Format_ARGB32
+        || source.format() == QImage::Format_RGBA8888_Premultiplied || source.format() == QImage::Format_RGBA8888;
+    const auto format = colored ? QFontEngine::Format_ARGB
+        : subpixel              ? QFontEngine::Format_A32
+        : source.depth() == 1   ? QFontEngine::Format_Mono
+                                : QFontEngine::Format_A8;
+    // Font metrics can include rows or columns missing from the rasterized glyph.
+    const auto bounds = engine->alphaMapBoundingBox(index, {}, {}, format);
+    const QPointF bearing(bounds.x.truncate(), bounds.y.truncate());
 
     if (subpixel && source.format() == QImage::Format_RGB32) {
         // Opaque alpha prevents premultiplication from altering the RGB coverage channels.
         return insert(key, source.convertToFormat(QImage::Format_ARGB32_Premultiplied), bearing, GlyphImage::Format::Subpixel);
     }
-
-    const bool colored = source.format() == QImage::Format_ARGB32_Premultiplied || source.format() == QImage::Format_ARGB32
-        || source.format() == QImage::Format_RGBA8888_Premultiplied || source.format() == QImage::Format_RGBA8888;
 
     if (colored) {
         return insert(key, source.convertToFormat(QImage::Format_ARGB32_Premultiplied), bearing, GlyphImage::Format::Color);
@@ -162,20 +186,43 @@ GlyphImage GlyphAtlas::glyph(const QRawFont &font, quint32 index, bool allowSubp
     return insert(key, image, bearing, GlyphImage::Format::Grayscale);
 }
 
-GlyphImage GlyphAtlas::symbol(char32_t cp, QSize cellSize, int strokeWidth)
+GlyphImage GlyphAtlas::symbol(char32_t cp, QSizeF cellSize, int strokeWidth)
 {
-    const Key key{{}, quint32(cp), Kind::Symbol};
+    const Key key{{}, quint32(cp), Kind::Symbol, false, cellSize.width(), cellSize.height(), strokeWidth};
+    const QSize minimum(qMax(1, qFloor(cellSize.width())), qMax(1, qFloor(cellSize.height())));
+    const QSize maximum(qMax(1, qCeil(cellSize.width())), qMax(1, qCeil(cellSize.height())));
+    auto sprite = find(key);
 
-    if (auto found = find(key); found.page) {
-        return found;
+    if (!sprite.page) {
+        const int columns{minimum.width() != maximum.width() ? 2 : 1};
+        const int rows{minimum.height() != maximum.height() ? 2 : 1};
+        QImage image(minimum.width() + (columns - 1) * (maximum.width() + 2),
+                     minimum.height() + (rows - 1) * (maximum.height() + 2),
+                     QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        QPainter painter{&image};
+        painter.setCompositionMode(QPainter::CompositionMode_Source);
+
+        // The shader chooses a size after snapping the cell's screen-space edges.
+        for (int y{0}; y < rows; ++y) {
+            for (int x{0}; x < columns; ++x) {
+                drawPaddedImage(painter, symbolImage(cp, minimum + QSize(x, y), strokeWidth), QPoint(x * (minimum.width() + 2), y * (minimum.height() + 2)));
+            }
+        }
+
+        painter.end();
+        sprite = insert(key, image, {}, GlyphImage::Format::Grayscale);
     }
 
-    return insert(key, symbolImage(cp, cellSize, strokeWidth), {}, GlyphImage::Format::Grayscale);
+    sprite.pixels.setSize(minimum);
+    sprite.hasSizeVariants = minimum != maximum;
+
+    return sprite;
 }
 
 GlyphImage GlyphAtlas::underline(int style, QSize cellSize, int strokeWidth)
 {
-    const Key key{{}, quint32(style), Kind::Underline};
+    const Key key{{}, quint32(style), Kind::Underline, false, qreal(cellSize.width()), qreal(cellSize.height()), strokeWidth};
 
     if (auto found = find(key); found.page) {
         return found;

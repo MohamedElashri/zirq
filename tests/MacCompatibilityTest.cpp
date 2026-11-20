@@ -13,7 +13,6 @@
 #include "settings/TerminalPaletteModel.h"
 #include "settings/TerminalPresets.h"
 #include "settings/TerminalSettings.h"
-#include "ui/AppShortcuts.h"
 #include "ui/AppAboutData.h"
 #include "ui/WebShortcutModel.h"
 #include <BreezeIcons>
@@ -83,7 +82,7 @@ int persistentState(const QString &output, bool managed, bool profile = false, c
     QJsonObject migration;
     if (profile) {
         Kwi::TerminalPaletteModel palettes{&settings};
-        Kwi::AppShortcuts shortcuts;
+        Kwi::WindowManager windows{&settings, &presets, &palettes};
         auto *collection = KirigamiActions::ActionCollections::self()->collection(QStringLiteral("org.kde.kwi.tabs"));
         auto *action = collection ? collection->action(QStringLiteral("new_tab")) : nullptr;
         if (!action)
@@ -105,6 +104,8 @@ int persistentState(const QString &output, bool managed, bool profile = false, c
                      {{QStringLiteral("migration"), migration},
                       {QStringLiteral("font"), settings.fontFamily()},
                       {QStringLiteral("opacity"), settings.backgroundOpacity()},
+                      {QStringLiteral("tab_bar_at_bottom"), settings.tabBarAtBottom()},
+                      {QStringLiteral("auto_hide_tab_bar"), settings.autoHideTabBar()},
                       {QStringLiteral("history"), settings.scrollbackLines()},
                       {QStringLiteral("immutable_history"), settings.isScrollbackLinesImmutable()},
                       {QStringLiteral("option_as_alt"), settings.optionAsAlt()},
@@ -122,7 +123,6 @@ class MacCompatibilityTest : public QObject
     Q_OBJECT
     std::unique_ptr<Kwi::TerminalSettings> m_settings;
     std::unique_ptr<Kwi::TerminalPresets> m_presets;
-    std::unique_ptr<Kwi::AppShortcuts> m_shortcuts;
     std::unique_ptr<Kwi::TerminalPaletteModel> m_palettes;
     QList<QUrl> m_opened;
 
@@ -162,7 +162,6 @@ private Q_SLOTS:
         KirigamiAppDefaults::apply(qApp);
         m_settings = std::make_unique<Kwi::TerminalSettings>();
         m_presets = std::make_unique<Kwi::TerminalPresets>(m_settings.get());
-        m_shortcuts = std::make_unique<Kwi::AppShortcuts>();
         m_palettes = std::make_unique<Kwi::TerminalPaletteModel>(m_settings.get());
     }
 
@@ -187,6 +186,8 @@ private Q_SLOTS:
         m_settings->setFontFamily(QStringLiteral("Menlo"));
         m_settings->setFontPointSize(11);
         m_settings->setBackgroundOpacity(.8);
+        m_settings->setTabBarAtBottom(true);
+        m_settings->setAutoHideTabBar(true);
         m_settings->setScrollbackLines(321);
         m_settings->setOptionAsAlt(true);
         QVERIFY(m_settings->save());
@@ -206,6 +207,8 @@ private Q_SLOTS:
         QCOMPARE(state.value(QStringLiteral("history")).toInt(), 321);
         QVERIFY(state.value(QStringLiteral("option_as_alt")).toBool());
         QCOMPARE(state.value(QStringLiteral("opacity")).toDouble(), .8);
+        QVERIFY(state.value(QStringLiteral("tab_bar_at_bottom")).toBool());
+        QVERIFY(state.value(QStringLiteral("auto_hide_tab_bar")).toBool());
         QCOMPARE(state.value(QStringLiteral("preset")).toString(), name);
         QCOMPARE(state.value(QStringLiteral("preset_command")).toArray(), QJsonArray::fromStringList(launch.command));
 
@@ -339,7 +342,7 @@ private Q_SLOTS:
 
     void sessionsMoveDetachAndCwd()
     {
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         QTemporaryDir directory{QDir::tempPath() + QStringLiteral("/kwi sessions-é-XXXXXX")};
         Kwi::LaunchOptions options;
         options.launch.command = QStringList{QStringLiteral("/bin/sh"), QStringLiteral("-i")};
@@ -451,7 +454,7 @@ private Q_SLOTS:
         auto config = KSharedConfig::openConfig(QStringLiteral("kwi.notifyrc"), KConfig::SimpleConfig);
         KConfigGroup(config, QStringLiteral("Event/bell")).writeEntry("Action", QString{});
         QVERIFY(config->sync()); // policy test: no actual OS popup
-        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_shortcuts.get(), m_palettes.get()};
+        Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         Kwi::LaunchOptions options;
         options.launch.command = QStringList{QStringLiteral("/bin/sh"), QStringLiteral("-i")};
         auto *window = windows.launch(options);

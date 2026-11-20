@@ -201,7 +201,7 @@ bool HostProcess::start(const TerminalLaunch &launch)
     });
 
     // Check the launcher itself, without executing a command or parsing version strings.
-    query->start({QStringLiteral("/usr/bin/systemd-run"), QStringLiteral("--expand-environment=no"), QStringLiteral("--version")});
+    query->start({QStringLiteral("systemd-run"), QStringLiteral("--expand-environment=no"), QStringLiteral("--version")});
 
     return true;
 }
@@ -218,11 +218,8 @@ void HostProcess::checkScopeManager(const TerminalLaunch &launch)
         resolve(launch);
     });
 
-    query->start({QStringLiteral("/usr/bin/systemctl"),
-                  QStringLiteral("--user"),
-                  QStringLiteral("show"),
-                  QStringLiteral("--property=Version"),
-                  QStringLiteral("--value")});
+    query->start(
+        {QStringLiteral("systemctl"), QStringLiteral("--user"), QStringLiteral("show"), QStringLiteral("--property=Version"), QStringLiteral("--value")});
 }
 
 bool HostProcess::waitingForLauncher() const
@@ -279,49 +276,57 @@ void HostProcess::cancelQueries()
 void HostProcess::resolve(const TerminalLaunch &launch)
 {
     const auto path = launch.environmentChanges.constFind(QStringLiteral("PATH"));
-    const bool removePath{path != launch.environmentChanges.cend() && !path.value()};
-    auto changes = launch.resolvedEnvironmentChanges();
-    // A preset's SHELL variable must not change which default shell is launched.
-    changes.remove(QStringLiteral("SHELL"));
-    const auto environment = hostEnvironment(changes);
+    QString pathMode{QStringLiteral("inherit")};
+    QProcessEnvironment environment;
+
+    // Helpers use the host PATH. The preset PATH applies only to command lookup.
+    if (path != launch.environmentChanges.cend()) {
+        pathMode = path.value() ? QStringLiteral("set") : QStringLiteral("unset");
+
+        if (path.value()) {
+            environment.insert(QStringLiteral("KWI_COMMAND_PATH"), *path.value());
+        }
+    }
 
     auto *query = new HostCommandQuery(m_bus, this);
     m_launchQuery = query;
 
-    connect(query, &HostCommandQuery::finished, this, [this, query, launch](HostCommandQuery::Result result, const QByteArray &output) {
-        const auto resolved = Protocol::decodeCommand(output);
-        m_launchQuery.clear();
-        query->deleteLater();
+    connect(query,
+            &HostCommandQuery::finished,
+            this,
+            [this, query, launch](HostCommandQuery::Result result, const QByteArray &output, const QString &errorString) {
+                const auto resolved = Protocol::decodeCommand(output);
+                m_launchQuery.clear();
+                query->deleteLater();
 
-        if (result == HostCommandQuery::Result::FailedToStart) {
-            fail(i18n("Could not contact the host terminal service."));
+                if (result == HostCommandQuery::Result::FailedToStart) {
+                    fail(errorString.isEmpty() ? i18n("Could not start the host terminal query.") : i18n("Could not start a host helper: %1", errorString));
 
-            return;
-        }
+                    return;
+                }
 
-        if (result != HostCommandQuery::Result::Success || !resolved) {
-            fail(launch.program.isEmpty() ? i18n("Could not find the system shell on the host.")
-                                          : i18n("Could not find the terminal command on the host: %1", launch.program));
+                if (result != HostCommandQuery::Result::Success || !resolved) {
+                    fail(launch.program.isEmpty() ? i18n("Could not find the system shell on the host.")
+                                                  : i18n("Could not find the terminal command on the host: %1", launch.program));
 
-            return;
-        }
+                    return;
+                }
 
-        m_initialExecutable = resolved->executable;
-        m_program = resolved->program;
-        m_interactiveShell = resolved->shell && interactiveShellArguments(launch.arguments);
-        spawn(launch);
-    });
+                m_initialExecutable = resolved->executable;
+                m_program = resolved->program;
+                m_interactiveShell = resolved->shell && interactiveShellArguments(launch.arguments);
+                spawn(launch);
+            });
 
-    query->start(environment.commandPrefix
-                     + QStringList{QStringLiteral("/bin/sh"),
-                                   QStringLiteral("-c"),
-                                   Protocol::resolveCommandScript(),
-                                   QStringLiteral("kwi-host-query"),
-                                   launch.program,
-                                   launch.program.isEmpty() ? QStringLiteral("1") : QStringLiteral("0"),
-                                   removePath ? QStringLiteral("1") : QStringLiteral("0")},
+    query->start({QStringLiteral("/bin/sh"),
+                  QStringLiteral("-c"),
+                  Protocol::resolveCommandScript(),
+                  QStringLiteral("kwi-host-query"),
+                  launch.program,
+                  launch.program.isEmpty() ? QStringLiteral("1") : QStringLiteral("0"),
+                  pathMode},
                  launch.directory,
-                 environment.values);
+                 environment);
 }
 
 void HostProcess::spawn(const TerminalLaunch &launch)
@@ -330,7 +335,7 @@ void HostProcess::spawn(const TerminalLaunch &launch)
     QStringList arguments{environment.commandPrefix + QStringList{m_program} + launch.arguments};
 
     if (m_useScopes) {
-        const auto scopedCommand = ProcessScope::hostCommand(QStringLiteral("/usr/bin/systemd-run"), arguments);
+        const auto scopedCommand = ProcessScope::hostCommand(QStringLiteral("systemd-run"), arguments);
         m_startupCommands = {scopedCommand, arguments};
         m_startupDeadline = QDeadlineTimer{std::chrono::seconds{5}};
         arguments = scopedCommand;
@@ -394,7 +399,7 @@ void HostProcess::fail(const QString &message)
     }
 }
 
-void HostProcess::finish(int exitCode)
+void HostProcess::finish(int exitCode, QProcess::ExitStatus exitStatus)
 {
     if (m_phase == Phase::Finished) {
         return;
@@ -411,7 +416,7 @@ void HostProcess::finish(int exitCode)
     completeRefresh();
 
     if (guard != nullptr) {
-        Q_EMIT finished(exitCode);
+        Q_EMIT finished(exitCode, exitStatus);
     }
 }
 
@@ -420,7 +425,8 @@ void HostProcess::hostExited(uint pid, uint status)
     if (!m_pid && m_spawn && isRunning()) {
         m_earlyExits.insert(pid, status);
     } else if (pid == m_pid && isRunning()) {
-        finish(WIFEXITED(status) ? WEXITSTATUS(status) : 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0));
+        finish(WIFEXITED(status) ? WEXITSTATUS(status) : 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0),
+               WIFSIGNALED(status) ? QProcess::CrashExit : QProcess::NormalExit);
     }
 }
 

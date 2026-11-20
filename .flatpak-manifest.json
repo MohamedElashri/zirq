@@ -45,13 +45,13 @@
             "sources": [
                 {
                     "type": "archive",
-                    "url": "https://release.files.ghostty.org/libghostty-vt/1.0.0/libghostty-vt-1.0.0.tar.gz",
-                    "sha256": "4a6ef758be721923e1969e7b81b443dcc92d8dd3fb5a39600c03a8817a753676"
+                    "url": "https://release.files.ghostty.org/libghostty-vt/1.0.1/libghostty-vt-1.0.1.tar.gz",
+                    "sha256": "333dfce97641ef9b536bb9e08907ad86abaaada50e8f7417b70d9284adef37aa"
                 },
                 {
                     "type": "archive",
-                    "url": "https://release.files.ghostty.org/libghostty-vt/1.0.0/libghostty-vt-1.0.0-deps.tar.gz",
-                    "sha256": "4d5ea5e448e4c7ea8fb55ccbaa8668f2a97d44f438cee831e2b7ecd162d85c29",
+                    "url": "https://release.files.ghostty.org/libghostty-vt/1.0.1/libghostty-vt-1.0.1-deps.tar.gz",
+                    "sha256": "91a4e10960a52bf5bf4b15aa2a2cddaff8a89d6cd903d3055bda4fd17de3356d",
                     "dest": "zig-packages"
                 },
                 {
@@ -87,35 +87,79 @@
             ]
         },
         {
-            "name": "kirigami-app-components",
+            "name": "kdbusaddons",
             "buildsystem": "cmake-ninja",
+            "builddir": true,
             "config-opts": [
+                "-DKDE_INSTALL_LIBDIR=lib",
+                "-DBUILD_TESTING=OFF"
+            ],
+            "sources": [
+                {
+                    "type": "git",
+                    "url": "https://invent.kde.org/frameworks/kdbusaddons.git"
+                }
+            ],
+            "post-install": [
+                "install -Dm644 ../LICENSES/* -t /app/share/licenses/org.kde.kwi/kdbusaddons"
+            ]
+        },
+        {
+            "name": "kirigami",
+            "buildsystem": "cmake-ninja",
+            "builddir": true,
+            "config-opts": [
+                "-DKDE_INSTALL_LIBDIR=lib",
                 "-DBUILD_TESTING=OFF",
                 "-DBUILD_EXAMPLES=OFF"
             ],
             "sources": [
                 {
                     "type": "git",
-                    "url": "https://invent.kde.org/libraries/kirigami-app-components.git",
-                    "branch": "master"
+                    "url": "https://invent.kde.org/frameworks/kirigami.git"
                 }
             ],
             "post-install": [
-                "install -Dm644 LICENSES/* -t /app/share/licenses/kirigami-app-components"
+                "install -Dm644 ../LICENSES/* -t /app/share/licenses/org.kde.kwi/kirigami"
             ]
+        },
+        {
+            "name": "kirigami-app-components",
+            "buildsystem": "cmake-ninja",
+            "config-opts": [
+                "-DKDE_INSTALL_LIBDIR=lib",
+                "-DBUILD_TESTING=OFF",
+                "-DBUILD_EXAMPLES=OFF"
+            ],
+            "sources": [
+                {
+                    "type": "git",
+                    "url": "https://invent.kde.org/libraries/kirigami-app-components.git"
+                }
+            ],
+            "post-install": [
+                "install -Dm644 ../LICENSES/* -t /app/share/licenses/org.kde.kwi/kirigami-app-components"
+            ],
+            "builddir": true
         },
         {
             "name": "union",
             "buildsystem": "cmake-ninja",
             "builddir": true,
             "config-opts": [
-                "-DBUILD_TESTING=OFF"
+                "-DKDE_INSTALL_LIBDIR=lib",
+                "-DBUILD_TESTING=OFF",
+                "-DBUILD_EXAMPLES=OFF",
+                "-DBUILD_TOOLS=OFF"
             ],
             "sources": [
                 {
                     "type": "git",
                     "url": "https://invent.kde.org/plasma/union.git"
                 }
+            ],
+            "post-install": [
+                "install -Dm644 ../LICENSES/* -t /app/share/licenses/org.kde.kwi/union"
             ]
         },
         {
@@ -138,6 +182,9 @@
             "config-opts": [
                 "-DBUILD_KPART=OFF",
                 "-DBUILD_TESTING=OFF"
+            ],
+            "post-install": [
+                "install -Dm644 LICENSES/* -t /app/share/licenses/org.kde.kwi/kwi"
             ]
         }
     ]

@@ -16,11 +16,12 @@ RowLayout {
     required property SessionModel sessions
     property WindowManager dragController: null
     property int position: Controls.TabBar.Header
+    property real outerPadding: 0
     property bool showStatusIcons: true
     readonly property int count: tabBar.count
     readonly property int currentIndex: sessions.currentIndex
     readonly property ListView view: tabBar.contentItem as ListView
-    readonly property bool overflowing: count * Kirigami.Units.gridUnit * 8 > width
+    readonly property bool overflowing: count * Kirigami.Units.gridUnit * 4 > width
 
     // Clip the selected tab's frame opening to the scrolled viewport.
     readonly property real viewportLeft: tabBar.x + view.x
@@ -171,6 +172,8 @@ RowLayout {
         background: null
         Layout.fillWidth: true
         Layout.fillHeight: true
+        Layout.topMargin: position === Controls.TabBar.Header ? root.outerPadding : -root.outerPadding
+        Layout.bottomMargin: -Layout.topMargin
         clip: true
         position: root.position
         currentIndex: root.sessions.currentIndex
@@ -192,7 +195,7 @@ RowLayout {
         implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset, contentItem.implicitHeight + topPadding + bottomPadding)
         contentHeight: availableHeight
 
-        readonly property real tabWidth: Math.max(Kirigami.Units.gridUnit * 8, Math.min(Kirigami.Units.gridUnit * 14, width / Math.max(1, count)))
+        readonly property real tabWidth: Math.max(Kirigami.Units.gridUnit * 4, Math.min(Kirigami.Units.gridUnit * 14, width / Math.max(1, count)))
 
         function revealCurrent(): void {
             setCurrentIndex(root.sessions.currentIndex);
@@ -255,6 +258,7 @@ RowLayout {
                 height: tabBar.availableHeight
                 tabPosition: root.position
                 showStatusIcons: root.showStatusIcons
+                checked: index === root.sessions.currentIndex
                 draggable: root.dragController !== null
                 dragging: dragHelper.Drag.active && dragHelper.tab === tabButton
                 readonly property bool moving: dragHelper.local && dragHelper.tab === tabButton
@@ -270,6 +274,31 @@ RowLayout {
                     z: -2
                     visible: tabButton.moving
                     color: Kirigami.Theme.backgroundColor
+                }
+
+                DropArea {
+                    id: contentDrop
+
+                    anchors.fill: parent
+
+                    onEntered: event => {
+                        event.accepted = false;
+
+                        if ((event.supportedActions & Qt.CopyAction) !== 0
+                            && !event.formats.includes("application/x-kwi-terminal-tab")
+                            && (event.hasText || event.hasUrls || event.formats.includes("application/vnd.portal.filetransfer"))) {
+                            event.accept(Qt.CopyAction);
+                        }
+                    }
+
+                    onDropped: event => event.accepted = false
+
+                    Timer {
+                        interval: 800 // Matches Dolphin.
+                        running: contentDrop.containsDrag && contentDrop.enabled && !tabButton.checked
+
+                        onTriggered: root.activated(tabButton.index)
+                    }
                 }
 
                 onClicked: root.activated(index)

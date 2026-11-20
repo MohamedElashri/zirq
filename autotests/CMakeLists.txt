@@ -25,24 +25,26 @@ set_tests_properties(launchsettingstest PROPERTIES LABELS "unit;launch")
 set_tests_properties(terminalpresetstest PROPERTIES LABELS "integration;settings")
 set_tests_properties(sessionmodeltest PROPERTIES LABELS "integration;application")
 
-add_executable(applicationtest applicationtest.cpp)
-target_link_libraries(applicationtest PRIVATE Qt6::Test kwi-ui Qt6::Widgets KirigamiApp)
-target_compile_definitions(applicationtest PRIVATE QT_FORCE_ASSERTS)
-ecm_mark_as_test(applicationtest)
-foreach(workflow IN ITEMS keyboardTabsAndSearch detachPreservesSession)
-    add_test(NAME application-${workflow}
-        COMMAND ${kwi_test_launcher} $<TARGET_FILE:applicationtest> ${workflow})
-    set_tests_properties(application-${workflow} PROPERTIES
-        TIMEOUT 60 LABELS "integration;application;gui" RESOURCE_LOCK kwi_gui)
-endforeach()
+if(BUILD_APP)
+    add_executable(applicationtest applicationtest.cpp)
+    target_link_libraries(applicationtest PRIVATE Qt6::Test kwi-ui Qt6::Widgets KirigamiApp)
+    target_compile_definitions(applicationtest PRIVATE QT_FORCE_ASSERTS)
+    ecm_mark_as_test(applicationtest)
+    foreach(workflow IN ITEMS keyboardTabsAndSearch detachPreservesSession)
+        add_test(NAME application-${workflow}
+            COMMAND ${kwi_test_launcher} $<TARGET_FILE:applicationtest> ${workflow})
+        set_tests_properties(application-${workflow} PROPERTIES
+            TIMEOUT 60 LABELS "integration;application;gui" RESOURCE_LOCK kwi_gui)
+    endforeach()
 
-# This suite isolates the Linux D-Bus activation service. macOS uses a local
-# activation socket and native settings paths, covered by macos-compatibility.
-if(NOT APPLE)
-    kwi_add_application_test(clitest KF6::ConfigCore)
-    target_compile_definitions(clitest PRIVATE KWI_EXECUTABLE_PATH="$<TARGET_FILE:kwi>")
-    add_dependencies(clitest kwi)
-    set_tests_properties(clitest PROPERTIES TIMEOUT 60 LABELS "integration;application;gui" RESOURCE_LOCK kwi_gui)
+    # This suite isolates the Linux D-Bus activation service. macOS uses a local
+    # activation socket and native settings paths, covered by macos-compatibility.
+    if(NOT APPLE)
+        kwi_add_application_test(clitest KF6::ConfigCore)
+        target_compile_definitions(clitest PRIVATE KWI_EXECUTABLE_PATH="$<TARGET_FILE:kwi>")
+        add_dependencies(clitest kwi)
+        set_tests_properties(clitest PROPERTIES TIMEOUT 60 LABELS "integration;application;gui" RESOURCE_LOCK kwi_gui)
+    endif()
 endif()
 
 if(BUILD_KPART)

@@ -85,6 +85,16 @@ FocusScope {
         onMultilinePasteRequested: (origin, text) => root.multilinePasteRequested(origin, text)
         onContextMenuRequested: position => root.contextMenuRequested(position)
         onLinkActivated: url => root.linkActivated(url)
+
+        TapHandler {
+            acceptedDevices: PointerDevice.TouchScreen
+            enabled: terminal.session && terminal.session.state === Session.Running && !terminal.session.readOnly
+
+            onTapped: {
+                terminal.forceActiveFocus(Qt.MouseFocusReason);
+                InputMethod.show();
+            }
+        }
     }
 
     Rectangle {
@@ -128,7 +138,6 @@ FocusScope {
     }
 
     Rectangle {
-        // Keep the scrollbar opaque even when its style paints a translucent background.
         anchors.fill: scrollbar
         color: scrollbar.Kirigami.Theme.backgroundColor
         Accessible.ignored: true
@@ -144,7 +153,7 @@ FocusScope {
         orientation: Qt.Vertical
 
         Kirigami.Theme.inherit: false
-        Kirigami.Theme.backgroundColor: terminal.colorScheme === "system" ? root.Kirigami.Theme.backgroundColor : terminal.backgroundColor
+        Kirigami.Theme.backgroundColor: Qt.alpha(terminal.colorScheme === "system" ? root.Kirigami.Theme.backgroundColor : terminal.backgroundColor, terminal.backgroundOpacity)
         Kirigami.Theme.textColor: terminal.colorScheme === "system" ? root.Kirigami.Theme.textColor : terminal.foregroundColor
 
         // HACK: The desktop style hides size == 1 even with AlwaysOn. One representable

@@ -41,7 +41,6 @@
 #include <QQuickWindow>
 #include <QRegularExpression>
 #include <QScopedValueRollback>
-#include <QScreen>
 #include <QStyleHints>
 #include <QVector>
 #include <QWheelEvent>
@@ -181,13 +180,13 @@ QVector<TextLink> textLinks(const QString &line, const QString &directory, bool 
             path.replace(0, 1, QDir::homePath());
         }
 
-        // Handle absolute paths without filesystem existence checks.
-        if (QDir::isRelativePath(path)) {
+        // Qt also treats ':' as absolute, but terminal paths refer to the filesystem.
+        if (!path.startsWith(QLatin1Char('/'))) {
             if (directory.isEmpty()) {
                 continue;
             }
 
-            path = QDir(directory).absoluteFilePath(path);
+            path.prepend(directory.endsWith(QLatin1Char('/')) ? directory : directory + QLatin1Char('/'));
             const QFileInfo info{path};
 
             if (!info.isFile() && !info.isDir()) {
@@ -283,32 +282,11 @@ Session *TerminalView::session() const
     return m_session;
 }
 
-void TerminalView::watchScreen(QScreen *screen)
-{
-    disconnect(m_dpiConnection);
-
-    if (screen) {
-        m_dpiConnection = connect(screen, &QScreen::logicalDotsPerInchChanged, this, [this] {
-            updateMetrics();
-        });
-    }
-
-    updateMetrics();
-}
-
 void TerminalView::itemChange(ItemChange change, const ItemChangeData &data)
 {
     QQuickItem::itemChange(change, data);
 
-    if (change == ItemSceneChange) {
-        disconnect(m_screenConnection);
-
-        if (data.window) {
-            m_screenConnection = connect(data.window, &QWindow::screenChanged, this, &TerminalView::watchScreen);
-        }
-
-        watchScreen(data.window ? data.window->screen() : nullptr);
-    } else if (change == ItemDevicePixelRatioHasChanged) {
+    if (change == ItemSceneChange || change == ItemDevicePixelRatioHasChanged) {
         updateMetrics();
     }
 }
@@ -736,11 +714,8 @@ void TerminalView::updateMetrics()
     m_font.setStyleHint(QFont::Monospace, m_font.styleStrategy());
     m_font.setPointSizeF(qBound(6.0, fontPointSize() + m_zoom, 72.0));
     const qreal dpr{window() ? window()->effectiveDevicePixelRatio() : 1};
-    const qreal dpi{window() && window()->screen() ? window()->screen()->logicalDotsPerInch() : 96};
-
-    // Align the clip and padding on a physical pixel to avoid a seam.
     m_padding = qRound(Padding * dpr) / dpr;
-    const auto metrics = GhosttyQt::Quick::fontMetrics(m_font, dpr, dpi);
+    const auto metrics = GhosttyQt::Quick::fontMetrics(m_font, dpr);
     m_cellWidth = metrics.cellSize.width();
     m_cellHeight = metrics.cellSize.height();
 
@@ -754,16 +729,16 @@ QSizeF TerminalView::sizeForGrid(int columns, int rows) const
         return {};
     }
 
-    return {columns * m_cellWidth + 2 * m_padding, rows * m_cellHeight + 2 * m_padding};
+    return {columns * m_cellWidth + 2 * Padding, rows * m_cellHeight + 2 * Padding};
 }
 
 void TerminalView::resizeTerminal()
 {
     // Wait for layout instead of reflowing a live session through a 2×1 grid.
-    if (m_session && width() >= 2 * m_padding + 2 * m_cellWidth && height() >= 2 * m_padding + m_cellHeight) {
+    if (m_session && width() >= 2 * Padding + 2 * m_cellWidth && height() >= 2 * Padding + m_cellHeight) {
         const qreal dpr{window() ? window()->effectiveDevicePixelRatio() : 1};
-        m_session->resize(int((width() - 2 * m_padding) / m_cellWidth),
-                          int((height() - 2 * m_padding) / m_cellHeight),
+        m_session->resize(int((width() - 2 * Padding) / m_cellWidth),
+                          int((height() - 2 * Padding) / m_cellHeight),
                           QSize(qRound(m_cellWidth * dpr), qRound(m_cellHeight * dpr)));
     }
 }
@@ -890,11 +865,11 @@ QSGNode *TerminalView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 
     GhosttyQt::Quick::TerminalNode::Options options;
     options.rect = boundingRect();
-    options.contentRect = boundingRect().adjusted(m_padding, m_padding, -m_padding, -m_padding);
     options.backgroundOpacity = m_backgroundOpacity;
     options.font = m_font;
     options.devicePixelRatio = window()->effectiveDevicePixelRatio();
-    options.logicalDpi = window()->screen() ? window()->screen()->logicalDotsPerInch() : 96;
+    // Align the painted origin without changing the grid's logical size.
+    options.contentRect = QRectF(QPointF(m_padding, m_padding), size() - QSizeF(2 * Padding, 2 * Padding));
     options.focused = hasActiveFocus();
     options.cursorBlinkVisible = m_cursorBlinkVisible || !hasActiveFocus();
     options.textBlinkVisible = m_textBlinkVisible;
@@ -952,8 +927,8 @@ QUrl TerminalView::hoveredLink() const
 
 QUrl TerminalView::linkAtPosition(QPointF position, QRegion *cells) const
 {
-    if (!m_session || !m_session->terminal() || position.x() < m_padding || position.y() < m_padding
-        || position.x() >= m_padding + m_frame.columns * m_cellWidth || position.y() >= m_padding + m_frame.rows.size() * m_cellHeight) {
+    if (!m_session || !m_session->terminal() || position.x() < m_padding || position.y() < m_padding || position.x() >= m_padding + m_frame.columns * m_cellWidth
+        || position.y() >= m_padding + m_frame.rows.size() * m_cellHeight) {
         return {};
     }
 
@@ -1133,8 +1108,7 @@ void TerminalView::updateHoveredLink(std::optional<QPointF> position, Qt::Keyboa
 {
     m_hoverPosition = position;
     QRegion cells;
-    const bool allowed{linkActivationAllowed(modifiers)};
-    const QUrl link{position ? linkAtPosition(*position, allowed ? &cells : nullptr) : QUrl()};
+    const QUrl link{position ? linkAtPosition(*position, &cells) : QUrl()};
 
     if (m_highlightedLink != cells) {
         m_highlightedLink = cells;
@@ -1147,9 +1121,10 @@ void TerminalView::updateHoveredLink(std::optional<QPointF> position, Qt::Keyboa
         Q_EMIT hoveredLinkChanged();
     }
 
-    const auto shape = !link.isEmpty() && allowed ? Qt::PointingHandCursor
-        : m_session && m_session->terminal()      ? m_session->terminal()->mouseCursorShape()
-                                                  : Qt::IBeamCursor;
+    const bool showHand{modifiers.testFlag(Qt::ControlModifier) && linkActivationAllowed(modifiers)};
+    const auto shape = !link.isEmpty() && showHand ? Qt::PointingHandCursor
+        : m_session && m_session->terminal()       ? m_session->terminal()->mouseCursorShape()
+                                                   : Qt::IBeamCursor;
 
     if (cursor().shape() != shape) {
         setCursor(shape);
@@ -1168,7 +1143,6 @@ void TerminalView::setRequireCtrlForLinks(bool required)
     }
 
     m_requireCtrlForLinks = required;
-    updateHoveredLink(m_hoverPosition, QGuiApplication::keyboardModifiers());
 
     Q_EMIT requireCtrlForLinksChanged();
 }
@@ -1301,6 +1275,21 @@ void TerminalView::scrollTo(qreal position)
 
     m_session->terminal()->scrollTo(offset);
     refresh();
+}
+
+void TerminalView::scrollLines(qint64 lines)
+{
+    if (!m_session || !m_session->terminal()) {
+        return;
+    }
+
+    m_session->terminal()->scroll(lines);
+    refresh();
+}
+
+void TerminalView::scrollPages(int pages)
+{
+    scrollLines(qint64{pages} * qMax(qsizetype{1}, m_frame.rows.size() - 1));
 }
 
 void TerminalView::scrollHistory(QPoint pixelDelta, QPoint angleDelta, Qt::KeyboardModifiers modifiers)
@@ -1629,14 +1618,6 @@ void TerminalView::keyPressEvent(QKeyEvent *event)
         updateHoveredLink(m_hoverPosition, event->modifiers());
     }
 
-    if (m_session && m_session->terminal() && event->modifiers() == Qt::ShiftModifier && (event->key() == Qt::Key_PageUp || event->key() == Qt::Key_PageDown)) {
-        m_session->terminal()->scroll((event->key() == Qt::Key_PageUp ? -1 : 1) * qMax(1, int(m_frame.rows.size()) - 1));
-        refresh();
-        event->accept();
-
-        return;
-    }
-
     if (m_session) {
         m_pressedKeys.insert(keyIdentity(event));
     }
@@ -1800,6 +1781,11 @@ QPoint TerminalView::cellAt(QPointF position) const
                                qBound(0, int((position.y() - m_padding) / m_cellHeight), qMax(0, int(m_frame.rows.size()) - 1))});
 }
 
+QPointF TerminalView::terminalPosition(QPointF position) const
+{
+    return {(position.x() - m_padding) * m_frame.cellPixels.width() / m_cellWidth, (position.y() - m_padding) * m_frame.cellPixels.height() / m_cellHeight};
+}
+
 void TerminalView::updateSelection(GhosttyQt::SelectionEvent::Type type, QPointF position, quint64 timestamp)
 {
     if (!m_session || !m_session->terminal()) {
@@ -1851,12 +1837,13 @@ void TerminalView::updateSelection(GhosttyQt::SelectionEvent::Type type, QPointF
         fraction = 1 - fraction;
     // Keep a pointer exactly on the RTL cell edge inside that cell's last
     // physical pixel rather than wrapping the native selection fraction to zero.
-    fraction = qBound(qreal(0), fraction, qreal(1) - qreal(0.5) / (m_cellWidth * dpr));
+    fraction = qBound(qreal(0), fraction, qreal(1) - qreal(0.5) / m_frame.cellPixels.width());
     logicalPosition.setX((logicalCell.x() + fraction) * m_cellWidth);
     m_session->terminal()->selectionGesture({
         .type = type,
         .cell = logicalCell,
-        .position = logicalPosition * dpr,
+        .position = QPointF(logicalPosition.x() * m_frame.cellPixels.width() / m_cellWidth,
+                            logicalPosition.y() * m_frame.cellPixels.height() / m_cellHeight),
         .timestamp = timestamp,
         .repeatInterval = qGuiApp->styleHints()->mouseDoubleClickInterval(),
         .repeatDistance = qRound(qGuiApp->styleHints()->mouseDoubleClickDistance() * dpr),
@@ -1887,13 +1874,12 @@ void TerminalView::sendMouse(GhosttyQt::MouseEvent event)
     if (!m_session || !m_session->terminal())
         return;
 
-    const qreal dpr{window() ? window()->effectiveDevicePixelRatio() : 1};
     const QPoint logical = cellAt(event.position);
     const QPoint visual = m_bidi.visualCell(logical);
     event.position.rx() += (logical.x() - visual.x()) * m_cellWidth;
-    event.position = (event.position - QPointF(m_padding, m_padding)) * dpr;
-    event.cellSize = QSizeF(m_cellWidth * dpr, m_cellHeight * dpr);
-    event.size = QSizeF(m_frame.columns * m_cellWidth * dpr, m_frame.rows.size() * m_cellHeight * dpr);
+    event.position = terminalPosition(event.position);
+    event.cellSize = m_frame.cellPixels;
+    event.size = QSizeF(m_frame.columns * m_frame.cellPixels.width(), m_frame.rows.size() * m_frame.cellPixels.height());
     m_session->send(m_session->terminal()->encodeMouse(event));
 }
 
@@ -1996,7 +1982,9 @@ void TerminalView::mousePressEvent(QMouseEvent *event)
 
     if (event->button() == Qt::LeftButton) {
         m_selecting = true;
-        updateSelection(GhosttyQt::SelectionEvent::Type::Press, event->position(), event->timestamp());
+        const bool extend{event->modifiers().testFlag(Qt::ShiftModifier) && m_session && m_session->terminal()
+                          && m_session->terminal()->canExtendSelectionGesture()};
+        updateSelection(extend ? GhosttyQt::SelectionEvent::Type::Drag : GhosttyQt::SelectionEvent::Type::Press, event->position(), event->timestamp());
     } else {
         if (m_session && m_session->terminal())
             m_session->terminal()->cancelSelectionGesture();

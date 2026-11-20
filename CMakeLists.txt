@@ -32,6 +32,7 @@ include(ECMGenerateQDoc)
 include(GenerateExportHeader)
 include(FeatureSummary)
 
+option(BUILD_APP "Build the Zirq application" ON)
 if(APPLE)
     set(_kwi_kpart_default OFF)
 else()
@@ -47,55 +48,80 @@ if(BUILD_TESTING)
 endif()
 
 find_package(Qt6 ${QT_MIN_VERSION} REQUIRED COMPONENTS
-    Core Gui GuiPrivate Quick Qml QmlIntegration QuickControls2 Concurrent DBus Network Widgets
-    ShaderTools Svg)
+    Core Gui GuiPrivate Quick Qml QmlIntegration QuickControls2 Concurrent DBus Network
+    ShaderTools)
 find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS
-    CoreAddons Config DBusAddons GuiAddons I18n Kirigami Pty KIO Notifications
-    WindowSystem)
-if(APPLE)
+    CoreAddons Config GuiAddons I18n Kirigami Pty)
+
+if(BUILD_APP OR BUILD_KPART)
+    find_package(Qt6 ${QT_MIN_VERSION} REQUIRED COMPONENTS Widgets Svg)
+    find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS KIO Notifications WindowSystem ColorScheme)
+    find_package(KF6KirigamiAddons 1.11 REQUIRED)
+endif()
+
+if(BUILD_APP)
+    find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS DBusAddons)
+    find_package(KF6KirigamiAppComponents 1.1 REQUIRED)
+endif()
+
+if(APPLE AND BUILD_APP)
     find_package(KF6BreezeIcons ${KF_MIN_VERSION} REQUIRED)
     find_package(KF6IconThemes ${KF_MIN_VERSION} REQUIRED)
 endif()
 
 if(BUILD_KPART)
     find_package(Qt6 ${QT_MIN_VERSION} REQUIRED COMPONENTS QuickWidgets)
-    find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS Parts XmlGui WidgetsAddons)
+    find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS Parts XmlGui WidgetsAddons IconThemes)
 endif()
 
-find_package(KF6KirigamiAddons 1.11 REQUIRED)
-find_package(KF6KirigamiAppComponents 1.1 REQUIRED)
-find_package(Ghostty 1.0 REQUIRED)
+find_package(Ghostty 1.0.1 REQUIRED)
 
 qt_standard_project_setup(REQUIRES ${QT_MIN_VERSION})
 
-ecm_find_qmlmodule(QtQuick.Dialogs REQUIRED)
-ecm_find_qmlmodule(org.kde.kirigami.forms REQUIRED)
-ecm_find_qmlmodule(org.kde.kirigami.dialogs REQUIRED)
-ecm_find_qmlmodule(org.kde.kirigami.delegates REQUIRED)
-ecm_find_qmlmodule(org.kde.kirigami.actioncollection REQUIRED)
-ecm_find_qmlmodule(org.kde.kirigamiaddons.settings REQUIRED)
-ecm_find_qmlmodule(org.kde.kitemmodels REQUIRED)
-ecm_find_qmlmodule(org.kde.desktop REQUIRED)
-ecm_find_qmlmodule(org.kde.notification REQUIRED)
+if(BUILD_APP OR BUILD_KPART)
+    ecm_find_qmlmodule(QtQuick.Dialogs REQUIRED)
+    ecm_find_qmlmodule(org.kde.kirigami.forms REQUIRED)
+    ecm_find_qmlmodule(org.kde.desktop REQUIRED)
+endif()
+
+if(BUILD_APP)
+    ecm_find_qmlmodule(Qt.labs.platform REQUIRED)
+    ecm_find_qmlmodule(org.kde.kirigami.dialogs REQUIRED)
+    ecm_find_qmlmodule(org.kde.kirigami.delegates REQUIRED)
+    ecm_find_qmlmodule(org.kde.kirigami.actioncollection REQUIRED)
+    ecm_find_qmlmodule(org.kde.kirigamiaddons.settings REQUIRED)
+    ecm_find_qmlmodule(org.kde.kitemmodels REQUIRED)
+    ecm_find_qmlmodule(org.kde.notification REQUIRED)
+endif()
 
 ecm_setup_version(PROJECT VARIABLE_PREFIX KWI
     VERSION_HEADER "${CMAKE_CURRENT_BINARY_DIR}/kwi-version.h")
-configure_file(src/kwi-config.h.in kwi-config.h @ONLY)
 
 add_subdirectory(libs/ghostty-qt)
 add_subdirectory(libs/ghostty-qt-quick)
 add_subdirectory(libs/kwi-terminal)
-add_subdirectory(src)
-add_subdirectory(data)
+
+if(BUILD_APP OR BUILD_KPART)
+    configure_file(src/kwi-config.h.in kwi-config.h @ONLY)
+    add_subdirectory(src)
+    add_subdirectory(data)
+
+    if(BUILD_TESTING)
+        add_subdirectory(autotests)
+    endif()
+endif()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)
-    add_subdirectory(autotests)
 
     if(APPLE)
         # Qt's native macOS data paths do not honor XDG_*_HOME. Give imported
         # upstream suites a private home before any application initializes.
-        foreach(test_directory IN ITEMS autotests libs/ghostty-qt/autotests libs/kwi-terminal/autotests)
+        set(test_directories libs/ghostty-qt/autotests libs/kwi-terminal/autotests)
+        if(BUILD_APP OR BUILD_KPART)
+            list(APPEND test_directories autotests)
+        endif()
+        foreach(test_directory IN LISTS test_directories)
             get_property(upstream_tests DIRECTORY "${test_directory}" PROPERTY TESTS)
             foreach(test IN LISTS upstream_tests)
                 set(test_home "${KWI_TEST_DATA_DIR}/homes/${test}")

@@ -9,7 +9,6 @@
 #include "settings/TerminalPresets.h"
 #include "settings/TerminalSettings.h"
 #include "ui/AppAboutData.h"
-#include "ui/AppShortcuts.h"
 
 #include <KAboutData>
 #include <KConfig>
@@ -162,11 +161,9 @@ int main(int argc, char **argv)
     Kwi::traceStage(QStringLiteral("after-settings"));
     Kwi::TerminalPresets presets{&settings};
     Kwi::traceStage(QStringLiteral("after-presets"));
-    Kwi::AppShortcuts shortcuts{};
-    Kwi::traceStage(QStringLiteral("after-shortcuts"));
     Kwi::TerminalPaletteModel palettes{&settings};
     Kwi::traceStage(QStringLiteral("after-palettes"));
-    Kwi::WindowManager windows{&settings, &presets, &shortcuts, &palettes};
+    Kwi::WindowManager windows{&settings, &presets, &palettes};
 
 #ifdef Q_OS_MACOS
     service.activate = [&](const QStringList &arguments, const QString &directory) {

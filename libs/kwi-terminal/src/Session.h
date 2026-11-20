@@ -11,6 +11,7 @@
 #include <QElapsedTimer>
 #include <QObject>
 #include <QPointer>
+#include <QProcess>
 #include <QSize>
 #include <QString>
 #include <QStringList>
@@ -95,7 +96,8 @@ class KWI_TERMINAL_EXPORT Session : public QObject
      * \value Session.Running The process has started.
      * \value Session.Closing The process is being closed.
      * \value Session.Exited The process has exited, or the session was closed before launch.
-     * \value Session.Failed The terminal could not be initialized, or the process failed to start.
+     * \value Session.Failed The terminal could not be initialized, the process failed to start,
+     * or it was terminated by a signal without a close() request.
      *
      * \sa active, finished, errorString
      */
@@ -118,6 +120,7 @@ class KWI_TERMINAL_EXPORT Session : public QObject
      * \qmlproperty int Session::exitCode
      * \readonly
      * The last process exit code. It is reset to zero when a launch is accepted.
+     * Signal termination is reported as 128 plus the signal number.
      * Use exited() to observe process completion.
      */
     Q_PROPERTY(int exitCode READ exitCode NOTIFY exitStatusChanged)
@@ -205,6 +208,14 @@ class KWI_TERMINAL_EXPORT Session : public QObject
      */
     Q_PROPERTY(QString sshHostName READ sshHostName NOTIFY sshInfoChanged)
     /*!
+     * \qmlproperty string Session::sshOriginalHostName
+     * \readonly
+     * The hostname or alias given to SSH, without its port, before applying its
+     * configuration or hostname resolution. Or an empty string when hasSshInfo is
+     * false. Use sshHostName instead for the resolved hostname.
+     */
+    Q_PROPERTY(QString sshOriginalHostName READ sshOriginalHostName NOTIFY sshInfoChanged)
+    /*!
      * \qmlproperty int Session::sshPort
      * \readonly
      * The SSH destination's resolved port, or zero when hasSshInfo is false.
@@ -258,6 +269,14 @@ class KWI_TERMINAL_EXPORT Session : public QObject
      * terminal protocol replies continue to work.
      */
     Q_PROPERTY(bool readOnly READ isReadOnly WRITE setReadOnly NOTIFY readOnlyChanged)
+    /*!
+     * \qmlproperty bool Session::alternateScreen
+     * \readonly
+     * Whether the process is using the alternate screen, which has no scrollback.
+     * Disable history-scrolling shortcuts on this screen to leave their keys
+     * available to the process.
+     */
+    Q_PROPERTY(bool alternateScreen READ alternateScreen NOTIFY alternateScreenChanged)
     /*!
      * \qmlproperty int Session::scrollbackLines
      * The history limit in lines. Zero disables history. The default, -1, removes
@@ -385,6 +404,7 @@ public:
     [[nodiscard]] bool hasSshInfo() const;
     [[nodiscard]] QString sshUserName() const;
     [[nodiscard]] QString sshHostName() const;
+    [[nodiscard]] QString sshOriginalHostName() const;
     [[nodiscard]] int sshPort() const;
     [[nodiscard]] QString sshRemoteCommand() const;
     [[nodiscard]] qint64 processId() const;
@@ -401,6 +421,7 @@ public:
 
     [[nodiscard]] bool isReadOnly() const;
     void setReadOnly(bool readOnly);
+    [[nodiscard]] bool alternateScreen() const;
     [[nodiscard]] int scrollbackLines() const;
     void setScrollbackLines(int lines);
     [[nodiscard]] bool monitorActivity() const;
@@ -513,9 +534,17 @@ Q_SIGNALS:
      */
     void processInfoRefreshed();
     void readOnlyChanged();
+    void alternateScreenChanged();
     void scrollbackLinesChanged();
     void monitoringChanged();
     void silenceSecondsChanged();
+    /*!
+     * \qmlsignal Session::outputReceived()
+     * Emitted after incoming output is processed. This does not require
+     * monitorActivity and is not rate-limited. Resizing or scrolling does not
+     * emit this signal.
+     */
+    void outputReceived();
     /*!
      * \qmlsignal Session::activityDetected()
      * Emitted when output arrives while monitorActivity is enabled. During
@@ -548,7 +577,7 @@ private:
     QPointer<TerminalView> m_view;
 
     void setState(State newState);
-    void finish(int code);
+    void finish(int code, QProcess::ExitStatus status = QProcess::NormalExit);
     void updateProgress();
     void refreshSessionMetadata();
     void reportError(const QString &message);

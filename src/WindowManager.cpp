@@ -12,11 +12,13 @@
 #include "settings/TerminalPaletteModel.h"
 #include "settings/TerminalPresets.h"
 #include "settings/TerminalSettings.h"
-#include "ui/AppShortcuts.h"
 
+#include <ActionCollection/ActionCollection>
+#include <ActionCollection/ActionCollections>
 #include <KLocalizedQmlContext>
 #include <KLocalizedString>
 #include <KSharedConfig>
+#include <KStandardActions>
 #include <KWindowEffects>
 #include <KWindowStateSaver>
 #include <KWindowSystem>
@@ -29,8 +31,11 @@
 #include <QEvent>
 #include <QEventLoopLocker>
 #include <QGuiApplication>
+#include <QKeyEvent>
 #include <QMetaObject>
 #include <QQmlApplicationEngine>
+#include <QQmlComponent>
+#include <QQmlListReference>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <QScreen>
@@ -57,7 +62,6 @@ public:
         , sharedSettings{settings}
         , sessions{new SessionModel{settings, presets, this}}
         , desktop{new DesktopIntegration{sessions, DesktopIntegration::Mode::Standalone, this}}
-        , engine{new QQmlApplicationEngine{this}}
     {
         connect(settings, &TerminalSettings::backgroundBlurChanged, this, &WindowContext::updateBlur);
         connect(settings, &TerminalSettings::backgroundOpacityChanged, this, &WindowContext::updateBlur);
@@ -66,7 +70,7 @@ public:
     ~WindowContext() override
     {
         // Destroy QML bindings and render resources before their session owners.
-        delete engine;
+        delete window;
     }
 
     void updateBlur()
@@ -85,20 +89,60 @@ public:
     TerminalSettings *const sharedSettings;
     SessionModel *sessions;
     DesktopIntegration *desktop;
-    QQmlApplicationEngine *engine;
     QPointer<QQuickWindow> window{};
     // Keep asynchronous process cleanup alive after the window disappears.
     QEventLoopLocker quitLock{};
     bool disposeAfterDrag{false};
+
+private:
+    bool eventFilter(QObject *object, QEvent *event) override
+    {
+        if (object == window
+            && (event->type() == QEvent::WindowDeactivate || event->type() == QEvent::WindowBlocked
+                || (event->type() == QEvent::KeyRelease && !static_cast<QKeyEvent *>(event)->isAutoRepeat()
+                    && static_cast<QKeyEvent *>(event)->modifiers() == Qt::NoModifier))) {
+            sessions->finishHistoryTraversal();
+        }
+
+        return QObject::eventFilter(object, event);
+    }
 };
 
-WindowManager::WindowManager(TerminalSettings *settings, TerminalPresets *presets, AppShortcuts *shortcuts, TerminalPaletteModel *palettes, QObject *parent)
+WindowManager::WindowManager(TerminalSettings *settings, TerminalPresets *presets, TerminalPaletteModel *palettes, QObject *parent)
     : QObject{parent}
     , m_settings{settings}
     , m_presets{presets}
-    , m_shortcuts{shortcuts}
     , m_palettes{palettes}
+    , m_engine{std::make_unique<QQmlApplicationEngine>()}
 {
+    KLocalization::setupLocalizedContext(m_engine.get());
+    m_engine->loadFromModule(QStringLiteral("org.kde.kwi"), QStringLiteral("ActionDefinitions"));
+
+    if (m_engine->rootObjects().isEmpty()) {
+        qFatal("Could not initialize application actions.");
+    }
+
+    // Keep persisted application shortcut IDs and Zirq's About/support handlers.
+    // Remove the manager's duplicates before any window binds to the collections.
+    if (auto *collection = KirigamiActions::ActionCollections::self()->collection(QStringLiteral("org.kde.globalactions"))) {
+        QQmlListReference actions{collection, "actions"};
+        QList<QObject *> sharedActions;
+        for (qsizetype index{0}; index < actions.count(); ++index) {
+            auto *action = actions.at(index);
+            const auto name = action->property("name").toString();
+            // Re-insertion must not stack the collection's registration callbacks.
+            QObject::disconnect(action, nullptr, collection, nullptr);
+            if (name == KStandardActions::name(KStandardActions::KeyBindings) || name == QLatin1String("FindAction")) {
+                sharedActions.append(action);
+            }
+        }
+        // The other declarative objects remain owned by the collection, but are
+        // absent from the action catalog and cannot introduce duplicate entries.
+        actions.clear();
+        for (auto *action : sharedActions) {
+            actions.append(action);
+        }
+    }
 #ifdef Q_OS_MACOS
     QCoreApplication::instance()->installEventFilter(this);
 #endif
@@ -299,34 +343,31 @@ WindowManager::WindowContext *WindowManager::createWindow()
     traceStage(QStringLiteral("before-window-context"));
     auto *context = new WindowContext{m_settings, m_presets, this};
     traceStage(QStringLiteral("after-window-context"));
-    KLocalization::setupLocalizedContext(context->engine);
-    context->engine->setInitialProperties({
+    QQmlComponent component{m_engine.get()};
+    component.loadFromModule(QStringLiteral("org.kde.kwi"), QStringLiteral("Main"));
+    auto *root = component.createWithInitialProperties({
         {QStringLiteral("appSettings"), QVariant::fromValue(m_settings)},
         {QStringLiteral("terminalPresets"), QVariant::fromValue(m_presets)},
         {QStringLiteral("presetEditor"), QVariant::fromValue(new PresetEditor{m_presets, context})},
-        {QStringLiteral("appShortcuts"), QVariant::fromValue(m_shortcuts)},
         {QStringLiteral("terminalPalettes"), QVariant::fromValue(m_palettes)},
         {QStringLiteral("sessionModel"), QVariant::fromValue(context->sessions)},
         {QStringLiteral("desktopIntegration"), QVariant::fromValue(context->desktop)},
         {QStringLiteral("tabDragController"), QVariant::fromValue(this)},
     });
 
-    context->engine->loadFromModule(QStringLiteral("org.kde.kwi"), QStringLiteral("Main"));
     traceStage(QStringLiteral("after-qml-load"));
-
-    if (context->engine->rootObjects().isEmpty()) {
-        delete context;
-
-        return nullptr;
-    }
-
-    context->window = qobject_cast<QQuickWindow *>(context->engine->rootObjects().constFirst());
+    context->window = qobject_cast<QQuickWindow *>(root);
 
     if (!context->window) {
+        qWarning() << component.errors();
+        delete root;
         delete context;
 
         return nullptr;
     }
+
+    context->window->QObject::setParent(context);
+    context->window->installEventFilter(context);
 
 #ifdef Q_OS_MACOS
     configureMacPresentation(context->window);
@@ -414,7 +455,7 @@ WindowManager::WindowContext *WindowManager::createWindow()
 
     connect(context->window, &QWindow::activeChanged, this, [this, context] {
         if (context->window && context->window->isActive()) {
-            m_activeWindow = context->window;
+            setActiveWindow(context->window);
             updateProgress();
         }
     });
@@ -621,6 +662,13 @@ void WindowManager::cancelQuit(const SessionModel *source)
     }
 }
 
+void WindowManager::setActiveWindow(QQuickWindow *window)
+{
+    m_activeWindow = window;
+    m_engine->setIncubationController(window->incubationController());
+    m_engine->rootObjects().constFirst()->setProperty("pageRow", window->property("pageStack"));
+}
+
 void WindowManager::activate(WindowContext *context, bool fullscreen)
 {
     auto states = context->window->windowStates() & ~Qt::WindowMinimized;
@@ -631,7 +679,7 @@ void WindowManager::activate(WindowContext *context, bool fullscreen)
 
     context->window->setWindowStates(states);
     context->window->setVisible(true);
-    m_activeWindow = context->window;
+    setActiveWindow(context->window);
     updateProgress();
 #ifdef Q_OS_MACOS
     context->window->raise();

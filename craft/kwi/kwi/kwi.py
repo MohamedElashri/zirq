@@ -8,7 +8,7 @@ from Package.CMakePackageBase import CMakePackageBase
 class subinfo(info.infoclass):
     def setTargets(self):
         self.description = "Zirq terminal for Apple Silicon macOS"
-        revision = "f226e487f500a955304b8c64e80d663252709b57"
+        revision = "02604b546fae229893b35550f449d8bcc54a589e"
         self.svnTargets["0.1.0"] = f"https://invent.kde.org/utilities/kwi.git|master|{revision}"
         self.defaultTarget = "0.1.0"
 
@@ -17,7 +17,7 @@ class subinfo(info.infoclass):
         self.buildDependencies["kde/frameworks/extra-cmake-modules"] = None
         for package in ["qtbase", "qtdeclarative", "qtshadertools", "qtsvg"]:
             self.runtimeDependencies[f"libs/qt6/{package}"] = None
-        for package in ["tier1/kcoreaddons", "tier1/kconfig", "tier1/kdbusaddons", "tier1/kguiaddons", "tier1/ki18n", "tier1/kirigami", "tier1/kitemmodels", "tier1/kwindowsystem", "tier2/kpty", "tier3/knotifications", "tier3/kio", "tier3/qqc2-desktop-style"]:
+        for package in ["tier1/kcoreaddons", "tier1/kconfig", "tier1/kdbusaddons", "tier1/kguiaddons", "tier1/ki18n", "tier1/kirigami", "tier1/kitemmodels", "tier1/kwindowsystem", "tier2/kpty", "tier2/kcolorscheme", "tier3/knotifications", "tier3/kio", "tier3/qqc2-desktop-style"]:
             self.runtimeDependencies[f"kde/frameworks/{package}"] = None
         self.runtimeDependencies["kde/unreleased/kirigami-addons"] = None
         self.runtimeDependencies["kde/libs/kirigami-app-components"] = None

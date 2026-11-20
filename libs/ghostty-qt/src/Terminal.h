@@ -161,6 +161,7 @@ public:
     bool
     selectCells(const QRegion &cells, qint64 firstScreenRow = -1, qint64 lastScreenRow = -1); // Discontiguous logical cells, for visual rectangular selection.
     bool selectionGesture(const SelectionEvent &event);
+    [[nodiscard]] bool canExtendSelectionGesture() const;
     [[nodiscard]] bool selectionAutoscroll() const;
     void cancelSelectionGesture();
     [[nodiscard]] std::optional<QPoint> adjustSelection(SelectionAdjustment adjustment, bool extendSelection);

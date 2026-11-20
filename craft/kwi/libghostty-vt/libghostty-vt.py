@@ -17,11 +17,11 @@ from Utils import CraftHash
 class subinfo(info.infoclass):
     def setTargets(self):
         self.description = "Pinned Ghostty VT C library for Zirq"
-        self.targets["1.0.0"] = "https://release.files.ghostty.org/libghostty-vt/1.0.0/libghostty-vt-1.0.0.tar.gz"
-        self.archiveNames["1.0.0"] = "libghostty-vt-1.0.0.tar.gz"
-        self.targetInstSrc["1.0.0"] = "libghostty-vt-1.0.0"
-        self.targetDigests["1.0.0"] = (["4a6ef758be721923e1969e7b81b443dcc92d8dd3fb5a39600c03a8817a753676"], CraftHash.HashAlgorithm.SHA256)
-        self.defaultTarget = "1.0.0"
+        self.targets["1.0.1"] = "https://release.files.ghostty.org/libghostty-vt/1.0.1/libghostty-vt-1.0.1.tar.gz"
+        self.archiveNames["1.0.1"] = "libghostty-vt-1.0.1.tar.gz"
+        self.targetInstSrc["1.0.1"] = "libghostty-vt-1.0.1"
+        self.targetDigests["1.0.1"] = (["333dfce97641ef9b536bb9e08907ad86abaaada50e8f7417b70d9284adef37aa"], CraftHash.HashAlgorithm.SHA256)
+        self.defaultTarget = "1.0.1"
 
     def setDependencies(self):
         self.buildDependencies["virtual/base"] = None

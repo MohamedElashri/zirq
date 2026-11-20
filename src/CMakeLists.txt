@@ -30,22 +30,49 @@ endif()
 add_library(kwi-ui STATIC)
 
 set(kwi_qml_files
-    declarative/Main.qml declarative/ActionDefinitions.qml declarative/TerminalTabs.qml
-    declarative/TerminalTabButton.qml declarative/SettingsPage.qml declarative/AppearanceSettings.qml
-    declarative/ColorSchemeEditor.qml declarative/TerminalSettings.qml declarative/BehaviorSettings.qml
-    declarative/KeyboardSettings.qml declarative/TerminalPane.qml declarative/TerminalSearchBar.qml
+    declarative/TerminalPane.qml
+    declarative/TerminalSearchBar.qml
     declarative/TerminalSearchField.qml
-    declarative/PresetsSettings.qml declarative/PromptDialogFooter.qml
-    declarative/WebShortcutMenu.qml declarative/TabCloseButton.qml declarative/ZirqAboutPage.qml
-    declarative/+org.kde.desktop/TabCloseButton.qml
-    declarative/+org.kde.union/TabCloseButton.qml
-    declarative/+org.kde.union/TerminalSearchField.qml)
-
-set_source_files_properties(
-    declarative/+org.kde.desktop/TabCloseButton.qml
-    declarative/+org.kde.union/TabCloseButton.qml
     declarative/+org.kde.union/TerminalSearchField.qml
+    declarative/components/PromptDialogFooter.qml
+    declarative/components/WebShortcutMenu.qml
+    declarative/settings/AppearanceSettings.qml
+    declarative/settings/BehaviorSettings.qml
+    declarative/settings/ColorSchemeEditor.qml
+    declarative/settings/PresetsSettings.qml
+    declarative/settings/SettingsPage.qml
+    declarative/settings/TerminalSettings.qml)
+
+set(kwi_ui_sources
+    ui/TextFormatting.cpp ui/TextFormatting.h
+    settings/WindowColorSchemes.cpp settings/WindowColorSchemes.h
+    ui/WebShortcutModel.cpp ui/WebShortcutModel.h)
+
+set_source_files_properties(declarative/+org.kde.union/TerminalSearchField.qml
     PROPERTIES QT_QML_SKIP_QMLDIR_ENTRY TRUE)
+
+if(BUILD_APP)
+    list(APPEND kwi_qml_files
+        declarative/ActionDefinitions.qml
+        declarative/Main.qml
+        declarative/ZirqAboutPage.qml
+        declarative/TabCloseButton.qml
+        declarative/TerminalTabButton.qml
+        declarative/TerminalTabs.qml
+        declarative/+org.kde.desktop/TabCloseButton.qml
+        declarative/+org.kde.union/TabCloseButton.qml
+        declarative/components/NativeMenu.qml
+        declarative/components/NativeMenuItem.qml
+        declarative/settings/KeyboardSettings.qml)
+    list(APPEND kwi_ui_sources
+        WindowManager.h WindowManager.cpp
+        ui/AppAboutData.cpp ui/AppAboutData.h
+        ui/NativeTabClose.cpp ui/NativeTabClose.h)
+    set_source_files_properties(
+        declarative/+org.kde.desktop/TabCloseButton.qml
+        declarative/+org.kde.union/TabCloseButton.qml
+        PROPERTIES QT_QML_SKIP_QMLDIR_ENTRY TRUE)
+endif()
 
 if(BUILD_KPART)
     list(APPEND kwi_qml_files declarative/EmbeddedTerminal.qml)
@@ -64,12 +91,7 @@ qt_add_qml_module(kwi-ui
     CLASS_NAME KwiTerminalPlugin
     QML_FILES ${kwi_qml_files}
     DEPENDENCIES org.kde.kwi.terminal
-    SOURCES WindowManager.h WindowManager.cpp
-        ui/AppAboutData.cpp ui/AppAboutData.h
-        ui/AppShortcuts.cpp ui/AppShortcuts.h
-        ui/TextFormatting.cpp ui/TextFormatting.h
-        ui/NativeTabClose.cpp ui/NativeTabClose.h
-        ui/WebShortcutModel.cpp ui/WebShortcutModel.h
+    SOURCES ${kwi_ui_sources}
 )
 qt_generate_foreign_qml_types(kwi-core kwi-ui)
 
@@ -80,28 +102,32 @@ set_target_properties(kwi-ui kwi-uiplugin ${kwi_ui_generated_targets}
 target_link_libraries(kwi-ui INTERFACE kwi-uiplugin)
 target_compile_definitions(kwi-ui PRIVATE TRANSLATION_DOMAIN="kwi")
 target_link_libraries(kwi-ui PUBLIC kwi-core Qt6::Quick
-    PRIVATE Qt6::QuickControls2 Qt6::Widgets Qt6::DBus KF6::CoreAddons KF6::KIOGui KF6::I18nQml KF6::Kirigami KF6::KirigamiPlatform KF6::KirigamiActionCollection KF6::WindowSystem)
+    PRIVATE Qt6::QuickControls2 Qt6::Widgets Qt6::DBus KF6::CoreAddons KF6::KIOGui KF6::I18nQml KF6::Kirigami KF6::KirigamiPlatform KF6::WindowSystem KF6::ColorScheme)
 target_include_directories(kwi-ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" PRIVATE settings ui "${PROJECT_BINARY_DIR}")
 
-qt_add_executable(kwi main.cpp)
-set_target_properties(kwi PROPERTIES OUTPUT_NAME "${KWI_EXECUTABLE}")
-if(APPLE)
-    target_sources(kwi PRIVATE LocalActivation.cpp LocalActivation.h)
-    target_link_libraries(kwi PRIVATE Qt6::Network KF6::BreezeIcons KF6::IconThemes)
-    set_target_properties(kwi PROPERTIES
-        MACOSX_BUNDLE_GUI_IDENTIFIER "${KWI_APP_ID}"
-        MACOSX_BUNDLE_BUNDLE_NAME "${KWI_DISPLAY_NAME}"
-        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
-        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
-        MACOSX_BUNDLE_COPYRIGHT "2026 Mohamed Elashri and KDE Kwi contributors")
-    include(ECMAddAppIcon)
-    configure_file("${PROJECT_SOURCE_DIR}/logo.png" "1024-zirq.png" COPYONLY)
-    ecm_add_app_icon(kwi OUTFILE_BASENAME zirq ICONS "${CMAKE_CURRENT_BINARY_DIR}/1024-zirq.png")
-    set_target_properties(kwi PROPERTIES MACOSX_BUNDLE_ICON_FILE "zirq.icns")
+if(BUILD_APP)
+    target_link_libraries(kwi-ui PRIVATE KF6::KirigamiActionCollection)
+    qt_add_executable(kwi main.cpp)
+    set_target_properties(kwi PROPERTIES OUTPUT_NAME "${KWI_EXECUTABLE}")
+    if(APPLE)
+        target_sources(kwi PRIVATE LocalActivation.cpp LocalActivation.h)
+        target_link_libraries(kwi PRIVATE Qt6::Network KF6::BreezeIcons KF6::IconThemes)
+        set_target_properties(kwi PROPERTIES
+            MACOSX_BUNDLE_GUI_IDENTIFIER "${KWI_APP_ID}"
+            MACOSX_BUNDLE_BUNDLE_NAME "${KWI_DISPLAY_NAME}"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_COPYRIGHT "2026 Mohamed Elashri and KDE Kwi contributors")
+        include(ECMAddAppIcon)
+        configure_file("${PROJECT_SOURCE_DIR}/logo.png" "1024-zirq.png" COPYONLY)
+        ecm_add_app_icon(kwi OUTFILE_BASENAME zirq ICONS "${CMAKE_CURRENT_BINARY_DIR}/1024-zirq.png")
+        set_target_properties(kwi PROPERTIES MACOSX_BUNDLE_ICON_FILE "zirq.icns")
+    endif()
+    target_link_libraries(kwi PRIVATE kwi-ui Qt6::Widgets KirigamiApp KF6::CoreAddons
+        KF6::DBusAddons KF6::I18nQml KF6::Kirigami KF6::WindowSystem)
+    target_include_directories(kwi PRIVATE "${PROJECT_BINARY_DIR}")
+    install(TARGETS kwi ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 endif()
-target_link_libraries(kwi PRIVATE kwi-ui Qt6::Widgets KirigamiApp KF6::CoreAddons
-    KF6::DBusAddons KF6::I18nQml KF6::Kirigami KF6::WindowSystem)
-target_include_directories(kwi PRIVATE "${PROJECT_BINARY_DIR}")
 
 if(BUILD_KPART)
     add_library(kwi-part-implementation STATIC
@@ -110,7 +136,7 @@ if(BUILD_KPART)
         ui/SettingsDialog.h ui/SettingsDialog.cpp)
     target_link_libraries(kwi-part-implementation
         PUBLIC kwi-ui Qt6::QuickWidgets Qt6::DBus KF6::Parts KF6::XmlGui KF6::WidgetsAddons
-        PRIVATE KF6::I18nQml KF6::KIOWidgets)
+        PRIVATE KF6::I18nQml KF6::KIOWidgets KF6::ColorScheme KF6::IconThemes KF6::GuiAddons)
     target_compile_definitions(kwi-part-implementation PRIVATE TRANSLATION_DOMAIN="kwi")
     set_target_properties(kwi-part-implementation PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -121,8 +147,6 @@ if(BUILD_KPART)
     target_include_directories(kwipart PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(kwipart PRIVATE kwi-part-implementation)
 endif()
-
-install(TARGETS kwi ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 
 if(APPLE)
     target_sources(kwi-ui PRIVATE ui/MacWindowEffects.mm ui/MacWindowEffects.h)

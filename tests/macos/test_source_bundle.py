@@ -29,6 +29,7 @@ class SourceBundleTest(unittest.TestCase):
                 self.assertTrue(source["url"].startswith("https://"))
                 self.assertRegex(source["sha256"], re.compile(r"^[0-9a-f]{64}$"))
         ghostty = json.loads((ROOT / "craft/ghostty-sources.json").read_text())
+        self.assertEqual(components["kwi/libghostty-vt"]["version"], ghostty["ghostty_version"])
         for source in ghostty["sources"]:
             self.assertIn({key: source[key] for key in ("url", "sha256")}, components["kwi/libghostty-vt"]["sources"])
 

@@ -16,7 +16,11 @@
 #include "ui/WebShortcuts_p.h"
 
 #include <KActionCollection>
+#include <KColorScheme>
+#include <KColorUtils>
 #include <KIO/KUriFilterSearchProviderActions>
+#include <KIconColors>
+#include <KIconLoader>
 #include <KLocalizedString>
 #include <KMessageBox>
 #include <KStandardActions>
@@ -25,6 +29,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
+#include <QColor>
 #include <QDir>
 #include <QEvent>
 #include <QFileDialog>
@@ -34,6 +39,7 @@
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPalette>
 #include <QPoint>
 #include <QPushButton>
 #include <QTabBar>
@@ -137,13 +143,14 @@ Part::Part(QWidget *, QObject *parent, const KPluginMetaData &metadata, const QV
     setWidget(m_tabs);
     m_tabs->setObjectName(QStringLiteral("kwiPartTabs"));
     m_tabs->setDocumentMode(true);
-    m_tabs->setTabBarAutoHide(true);
     m_tabs->setTabsClosable(true);
+    m_tabs->setTabBarAutoHide(true);
     m_tabs->setMovable(true);
     m_tabs->installEventFilter(this);
 
     const auto updateTabPosition = [this] {
-        m_tabs->setTabPosition(m_settings->tabBarAtBottom() ? QTabWidget::South : QTabWidget::North);
+        const auto position{m_settings->tabBarAtBottom()};
+        m_tabs->setTabPosition(position ? QTabWidget::South : QTabWidget::North);
     };
 
     connect(m_settings, &TerminalSettings::tabBarAtBottomChanged, m_tabs, updateTabPosition);
@@ -355,6 +362,7 @@ void Part::addSessionWidget(TerminalSession *session)
         }
 
         m_tabs->setTabText(m_tabs->indexOf(container), session->title());
+        updateTabAppearance(session);
 
         if (activeSession() == session) {
             Q_EMIT setWindowCaption(session->title());
@@ -387,27 +395,69 @@ void Part::addSessionWidget(TerminalSession *session)
     });
 
     connect(session, &TerminalSession::monitoringChanged, this, &Part::updateActions);
-    const auto updateTabIcon = [this, session, container] {
-        if (m_destroying) {
-            return;
-        }
-
-        m_tabs->setTabIcon(m_tabs->indexOf(container), m_settings->showTabStatusIcons() ? QIcon::fromTheme(session->iconName()) : QIcon{});
+    const auto updateTab = [this, session] {
+        updateTabAppearance(session);
     };
 
-    connect(session, &TerminalSession::iconNameChanged, container, updateTabIcon);
-    connect(m_settings, &TerminalSettings::showTabStatusIconsChanged, container, updateTabIcon);
-    updateTabIcon();
+    connect(session, &TerminalSession::iconNameChanged, container, updateTab);
+    connect(m_settings, &TerminalSettings::showTabStatusIconsChanged, container, updateTab);
+    connect(session, &TerminalSession::unreadOutputChanged, container, updateTab);
+    updateTab();
 
     connect(session, &TerminalSession::readOnlyChanged, this, &Part::updateActions);
     connect(session, &Session::activeChanged, this, &Part::updateActions);
+    connect(session, &Session::alternateScreenChanged, this, &Part::updateActions);
 
     if (auto *terminal = page->terminalView()) {
         connect(terminal, &TerminalView::selectionChanged, this, &Part::updateActions);
+        connect(terminal, &TerminalView::keyboardSelectionChanged, this, &Part::updateActions);
+        connect(terminal, &TerminalView::activeFocusChanged, this, &Part::updateActions);
         connect(terminal, &QObject::destroyed, this, &Part::updateActions);
     }
 
     activateSession();
+}
+
+void Part::updateTabAppearance(TerminalSession *session)
+{
+    if (m_destroying) {
+        return;
+    }
+
+    QColor color;
+    QString accessibleName;
+
+    if (session->hasUnreadOutput()) {
+        const auto &palette = m_tabs->palette();
+        const QColor activeColor{KColorScheme{palette.currentColorGroup(), KColorScheme::Window}.foreground(KColorScheme::ActiveText).color()};
+        // HACK: Use a 50/50 blend of normal and active text colors. This works
+        // around many (especially light) color schemes not providing pleasing
+        // contrast between `activeTextColor` and the background. It's not great
+        // to let the color schemes get away with this, but it's pragmatic for
+        // now. On the back of Union theming, we may revisit tab button theming
+        // later on and perhaps move toward background effects.
+        color = KColorUtils::mix(palette.text().color(), activeColor);
+        accessibleName = i18ndc("kwi", "@info:accessibility", "%1, new output", session->title());
+    }
+
+    QIcon icon;
+
+    const QString name{session->iconName()};
+
+    if (m_settings->showTabStatusIcons() && !name.isEmpty()) {
+        if (color.isValid()) {
+            KIconColors colors;
+            colors.setText(color);
+            icon = KDE::icon(name, colors);
+        } else {
+            icon = QIcon::fromTheme(name);
+        }
+    }
+
+    const int index{m_tabs->indexOf(m_pages.value(session))};
+    m_tabs->setTabIcon(index, icon);
+    m_tabs->tabBar()->setTabTextColor(index, color);
+    m_tabs->tabBar()->setAccessibleTabName(index, accessibleName);
 }
 
 void Part::removeSessionWidget(TerminalSession *session)
@@ -524,12 +574,25 @@ int Part::terminalProcessId()
 
 int Part::foregroundProcessId()
 {
-    return activeSession() ? activeSession()->foregroundCommandId() : -1;
+    const QPointer<TerminalSession> session{activeSession()};
+
+    if (session) {
+        // Hosts use this query to decide whether sending shell commands is safe.
+        session->refreshProcessInfo();
+    }
+
+    return session ? session->foregroundCommandId() : -1;
 }
 
 QString Part::foregroundProcessName()
 {
-    return activeSession() ? activeSession()->foregroundCommandName() : QString{};
+    const QPointer<TerminalSession> session{activeSession()};
+
+    if (session) {
+        session->refreshProcessInfo();
+    }
+
+    return session ? session->foregroundCommandName() : QString{};
 }
 
 QString Part::currentWorkingDirectory() const
@@ -717,6 +780,30 @@ void Part::setupActions()
 
     KActionCollection::setDefaultShortcuts(selectAll, {});
 
+    add("scroll_line_up", i18ndc("kwi", "@action", "Scroll Up One Line"), "go-up", QKeySequence(Qt::SHIFT | Qt::Key_Up), [this] {
+        if (activeWidget()) {
+            activeWidget()->terminalView()->scrollLines(-1);
+        }
+    });
+
+    add("scroll_line_down", i18ndc("kwi", "@action", "Scroll Down One Line"), "go-down", QKeySequence(Qt::SHIFT | Qt::Key_Down), [this] {
+        if (activeWidget()) {
+            activeWidget()->terminalView()->scrollLines(1);
+        }
+    });
+
+    add("scroll_page_up", i18ndc("kwi", "@action", "Scroll Up One Page"), "go-up", QKeySequence(Qt::SHIFT | Qt::Key_PageUp), [this] {
+        if (activeWidget()) {
+            activeWidget()->terminalView()->scrollPages(-1);
+        }
+    });
+
+    add("scroll_page_down", i18ndc("kwi", "@action", "Scroll Down One Page"), "go-down", QKeySequence(Qt::SHIFT | Qt::Key_PageDown), [this] {
+        if (activeWidget()) {
+            activeWidget()->terminalView()->scrollPages(1);
+        }
+    });
+
     auto *find = collection->addAction(KStandardActions::Find, this, [this] {
         if (activeWidget()) {
             activeWidget()->showFind();
@@ -795,25 +882,30 @@ void Part::setupActions()
     });
 
     silence->setCheckable(true);
-    add("new-tab", i18nd("kwi", "New Tab"), "tab-new", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_T), [this] {
+    // Leave session creation and naming shortcuts to the host.
+    add("new-tab", i18nd("kwi", "New Tab"), "tab-new", {}, [this] {
         newTab();
     });
 
-    add("rename-session", i18nd("kwi", "Rename Tab…"), "edit-rename", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S), [this] {
+    add("rename-session", i18nd("kwi", "Rename Tab…"), "edit-rename", {}, [this] {
         renameSession(activeSession());
     });
 
-    add("next-tab", i18nd("kwi", "Next Tab"), "go-next", QKeySequence(Qt::CTRL | Qt::Key_PageDown), [this] {
+    auto *nextTab = add("next-tab", i18nd("kwi", "Next Tab"), "go-next", {}, [this] {
         if (m_tabs->count()) {
             m_tabs->setCurrentIndex((m_tabs->currentIndex() + 1) % m_tabs->count());
         }
     });
 
-    add("previous-tab", i18nd("kwi", "Previous Tab"), "go-previous", QKeySequence(Qt::CTRL | Qt::Key_PageUp), [this] {
+    KActionCollection::setDefaultShortcuts(nextTab, {QKeySequence(Qt::SHIFT | Qt::Key_Right), QKeySequence(Qt::CTRL | Qt::Key_PageDown)});
+
+    auto *previousTab = add("previous-tab", i18nd("kwi", "Previous Tab"), "go-previous", {}, [this] {
         if (m_tabs->count()) {
             m_tabs->setCurrentIndex((m_tabs->currentIndex() + m_tabs->count() - 1) % m_tabs->count());
         }
     });
+
+    KActionCollection::setDefaultShortcuts(previousTab, {QKeySequence(Qt::SHIFT | Qt::Key_Left), QKeySequence(Qt::CTRL | Qt::Key_PageUp)});
 
     add("close-session", i18nd("kwi", "Close Tab"), "tab-close", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_W), [this] {
         m_sessions->closeSession(m_sessions->currentIndex());
@@ -858,10 +950,20 @@ void Part::updateActions()
         action->setEnabled(session != nullptr && activeWidget() != nullptr);
     }
 
+    const bool multipleTabs{m_tabs->count() > 1};
+    collection->action(QStringLiteral("next-tab"))->setEnabled(multipleTabs);
+    collection->action(QStringLiteral("previous-tab"))->setEnabled(multipleTabs);
     collection->action(QStringLiteral("edit_copy"))->setEnabled(activeWidget() && activeWidget()->terminalView()->hasSelection());
 
     if (!session || !activeWidget()) {
         return;
+    }
+
+    auto *terminal = activeWidget()->terminalView();
+    const bool canScrollHistory{terminal->hasActiveFocus() && !session->alternateScreen() && !terminal->keyboardSelectionMode()};
+
+    for (const auto *id : {"scroll_line_up", "scroll_line_down", "scroll_page_up", "scroll_page_down"}) {
+        collection->action(QString::fromLatin1(id))->setEnabled(canScrollHistory);
     }
 
     collection->action(QStringLiteral("view-readonly"))->setChecked(session->isReadOnly());
@@ -1059,6 +1161,12 @@ void Part::updateHostFocus()
 
 bool Part::eventFilter(QObject *object, QEvent *event)
 {
+    if (!m_destroying && object == m_tabs && event->type() == QEvent::PaletteChange) {
+        for (auto it = m_pages.cbegin(); it != m_pages.cend(); ++it) {
+            updateTabAppearance(it.key());
+        }
+    }
+
     if (!m_destroying && object != m_tabs && (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress)) {
         const QKeySequence pressed{static_cast<QKeyEvent *>(event)->keyCombination()};
 

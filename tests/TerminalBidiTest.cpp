@@ -34,6 +34,19 @@ class TerminalBidiTest : public QObject
     }
 
 private Q_SLOTS:
+    void gridSizeDoesNotChangeWithDisplayScale()
+    {
+        QFont font{QStringLiteral("Menlo")};
+        font.setPointSizeF(11);
+        const auto logical = fontMetrics(font, 1);
+        for (const qreal scale : {1.25, 1.5, 1.75, 2.0, 3.0}) {
+            const auto scaled = fontMetrics(font, scale);
+            QCOMPARE(scaled.cellSize, logical.cellSize);
+            QVERIFY(scaled.pixelFont.pixelSize() > logical.pixelFont.pixelSize());
+            QVERIFY(scaled.baseline > 0 && scaled.baseline <= scaled.cellSize.height());
+        }
+    }
+
     void languages_data()
     {
         QTest::addColumn<QString>("text");
@@ -142,7 +155,7 @@ private Q_SLOTS:
         terminal.feed(QStringLiteral("A日B本CλD 中E").toUtf8());
         Frame frame;
         QVERIFY(terminal.snapshot(frame));
-        const auto metrics = fontMetrics(QFont(QStringLiteral("Menlo")), 2, 96);
+        const auto metrics = fontMetrics(QFont(QStringLiteral("Menlo")), 2);
         GridShaper shaper;
         shaper.setMetrics(metrics, 2);
         const auto glyphs = shaper.shape(frame.rows[0], 0, 13);
@@ -195,7 +208,7 @@ private Q_SLOTS:
         BidiLayout bidi;
         bidi.update(frame);
         const QFont font(QStringLiteral("Menlo"));
-        const auto metrics = fontMetrics(font, 2, 96);
+        const auto metrics = fontMetrics(font, 2);
         GridShaper shaper;
         shaper.setMetrics(metrics, 2);
         bool miss = false;
@@ -350,7 +363,7 @@ private Q_SLOTS:
         GridShaper shaper;
         QFont font(QStringLiteral("Menlo"));
         font.setPointSizeF(14);
-        shaper.setMetrics(fontMetrics(font, 2, 72), 2);
+        shaper.setMetrics(fontMetrics(font, 2), 2);
         QVERIFY(!shaper.shapeBidi(bidi.rows()[0]).isEmpty());
         QVERIFY(!shaper.shapeBidi(bidi.rows()[1]).isEmpty());
     }
