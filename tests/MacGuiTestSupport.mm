@@ -114,6 +114,31 @@ void postMacTestKey(QWindow *window,
     [NSApp postEvent:event atStart:NO];
 }
 
+void postMacTestModifiers(QWindow *window, unsigned short keyCode, Qt::KeyboardModifiers modifiers)
+{
+    NSView *view = reinterpret_cast<NSView *>(window->winId());
+    NSEventModifierFlags flags = 0;
+    if (modifiers.testFlag(Qt::ControlModifier))
+        flags |= NSEventModifierFlagCommand;
+    if (modifiers.testFlag(Qt::MetaModifier))
+        flags |= NSEventModifierFlagControl;
+    if (modifiers.testFlag(Qt::AltModifier))
+        flags |= NSEventModifierFlagOption;
+    if (modifiers.testFlag(Qt::ShiftModifier))
+        flags |= NSEventModifierFlagShift;
+    NSEvent *event = [NSEvent keyEventWithType:NSEventTypeFlagsChanged
+                                      location:NSZeroPoint
+                                 modifierFlags:flags
+                                     timestamp:NSProcessInfo.processInfo.systemUptime
+                                  windowNumber:view.window.windowNumber
+                                       context:nil
+                                    characters:@""
+                   charactersIgnoringModifiers:@""
+                                     isARepeat:NO
+                                       keyCode:keyCode];
+    [NSApp postEvent:event atStart:NO];
+}
+
 void setMacTestPreedit(QWindow *window, const QString &text)
 {
     id<NSTextInputClient> view = reinterpret_cast<id<NSTextInputClient>>(window->winId());

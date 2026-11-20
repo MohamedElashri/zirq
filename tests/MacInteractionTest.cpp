@@ -24,6 +24,9 @@
 #include <QClipboard>
 #include <QDesktopServices>
 #include <QDir>
+#include <QDragEnterEvent>
+#include <QDragLeaveEvent>
+#include <QDragMoveEvent>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QImage>
@@ -31,6 +34,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMimeData>
 #include <QPalette>
 #include <QProcess>
 #include <QQmlComponent>
@@ -169,6 +173,19 @@ class MacInteractionTest : public QObject
         postMacTestKey(m_window, code, modifiers, text, base, true);
     }
 
+    bool addSleepingTabs(int count)
+    {
+        auto *model = m_windows->sessions(m_window);
+        while (model->count() < count) {
+            Kwi::LaunchRequest request;
+            request.command = QStringList{QStringLiteral("/bin/sleep"), QStringLiteral("60")};
+            request.contextDirectory = m_directory.path();
+            if (!model->launchSession(request, {}, false, QStringLiteral("Tab العربية %1").arg(model->count())))
+                return false;
+        }
+        return true;
+    }
+
     void screenshot(const QString &name)
     {
         QTest::qWait(150);
@@ -255,6 +272,241 @@ private Q_SLOTS:
         QTest::qWait(150);
         nativeKey(13, QStringLiteral("w"), QStringLiteral("w"), Qt::ControlModifier);
         QTRY_COMPARE(model->count(), 1);
+    }
+
+    void dragHoverActivatesTab_data()
+    {
+        QTest::addColumn<QString>("payload");
+        QTest::addColumn<bool>("leaveEarly");
+        for (const char *payload : {"text", "urls", "portal", "unsupported", "internal-tab", "move-only"})
+            QTest::newRow(payload) << QString::fromLatin1(payload) << false;
+        QTest::newRow("leaving-cancels-activation") << QStringLiteral("text") << true;
+    }
+
+    void dragHoverActivatesTab()
+    {
+        QFETCH(QString, payload);
+        QFETCH(bool, leaveEarly);
+        QVERIFY(addSleepingTabs(2));
+        auto *model = m_windows->sessions(m_window);
+        QTRY_COMPARE(model->currentIndex(), 1);
+        auto *tab = qobject_cast<QQuickItem *>(optionObject(m_window, QStringLiteral("terminalTab0")));
+        QVERIFY(tab);
+        QTRY_VERIFY(tab->isVisible() && tab->width() > 0);
+        const QPoint position = tab->mapToScene(QPointF{tab->width() / 2, tab->height() / 2}).toPoint();
+        QMimeData mime;
+        if (payload == QLatin1String("urls"))
+            mime.setUrls({QUrl::fromLocalFile(m_directory.filePath(QStringLiteral("input.py")))});
+        else if (payload == QLatin1String("portal"))
+            mime.setData(QStringLiteral("application/vnd.portal.filetransfer"), "test-transfer");
+        else if (payload == QLatin1String("internal-tab"))
+            mime.setData(QStringLiteral("application/x-kwi-terminal-tab"), "not-an-external-drop");
+        else if (payload == QLatin1String("unsupported"))
+            mime.setData(QStringLiteral("application/octet-stream"), "opaque");
+        else
+            mime.setText(QStringLiteral("Dragged text العربية"));
+        const Qt::DropActions actions = payload == QLatin1String("move-only") ? Qt::MoveAction : Qt::CopyAction;
+        const bool accepted = payload == QLatin1String("text") || payload == QLatin1String("urls") || payload == QLatin1String("portal");
+        const auto leave = [&] {
+            QDragLeaveEvent event;
+            QCoreApplication::sendEvent(m_window, &event);
+        };
+        const auto finish = qScopeGuard(leave);
+        QDragEnterEvent enter{position, actions, &mime, Qt::LeftButton, Qt::NoModifier};
+        QCoreApplication::sendEvent(m_window, &enter);
+        QDragMoveEvent move{position, actions, &mime, Qt::LeftButton, Qt::NoModifier};
+        QCoreApplication::sendEvent(m_window, &move);
+        QCOMPARE(move.isAccepted(), accepted);
+        // Crossing a tab must not switch immediately; a sustained accepted hover does.
+        QTest::qWait(150);
+        QCOMPARE(model->currentIndex(), 1);
+        if (leaveEarly)
+            leave();
+        if (accepted && !leaveEarly) {
+            QTRY_COMPARE_WITH_TIMEOUT(model->currentIndex(), 0, 2000);
+            QTRY_VERIFY(m_view->hasActiveFocus());
+        } else {
+            QTest::qWait(1000);
+            QCOMPARE(model->currentIndex(), 1);
+        }
+        QCOMPARE(model->count(), 2);
+        QCOMPARE(received(), QByteArray{});
+    }
+
+    void backgroundOutputIndicator_data()
+    {
+        QTest::addColumn<bool>("statusIcons");
+        QTest::newRow("with-status-icons") << true;
+        QTest::newRow("without-status-icons") << false;
+    }
+
+    void backgroundOutputIndicator()
+    {
+        QFETCH(bool, statusIcons);
+        m_settings->setShowTabStatusIcons(statusIcons);
+        m_session->setCustomTitle(QStringLiteral("Background العربية"));
+        QVERIFY(addSleepingTabs(2));
+        auto *model = m_windows->sessions(m_window);
+        QTRY_COMPARE(model->currentIndex(), 1);
+        auto *tab = qobject_cast<QQuickItem *>(optionObject(m_window, QStringLiteral("terminalTab0")));
+        auto *label = optionObject(m_window, QStringLiteral("terminalTabLabel0"));
+        QVERIFY(tab && label);
+        QTRY_VERIFY(tab->isVisible());
+        QVERIFY(!m_session->hasUnreadOutput());
+        const auto normalColor = label->property("color").value<QColor>();
+        QVERIFY(normalColor.isValid());
+        QAccessible::setActive(true);
+        auto *accessible = QAccessible::queryAccessibleInterface(tab);
+        QVERIFY(accessible);
+        QVERIFY(!accessible->text(QAccessible::Name).contains(QLatin1String("new output")));
+        // Exercise real PTY output from the existing raw-mode child in the background.
+        QVERIFY(m_session->sendInput(QStringLiteral("unread")));
+        QTRY_COMPARE(received(), QByteArray{"unread"});
+        QTRY_VERIFY(m_session->hasUnreadOutput());
+        QTRY_VERIFY(label->property("color").value<QColor>() != normalColor);
+        QTRY_VERIFY(accessible->text(QAccessible::Name).contains(QLatin1String("new output")));
+        QCOMPARE(label->property("text").toString(), QStringLiteral("Background العربية"));
+        screenshot(QStringLiteral("unread-tab-%1").arg(statusIcons));
+        QTest::mouseClick(m_window, Qt::LeftButton, Qt::NoModifier,
+                          tab->mapToScene(QPointF{tab->width() / 2, tab->height() / 2}).toPoint());
+        QTRY_COMPARE(model->currentIndex(), 0);
+        QTRY_VERIFY(!m_session->hasUnreadOutput());
+        QTRY_VERIFY(!accessible->text(QAccessible::Name).contains(QLatin1String("new output")));
+        const auto activeHistory = m_session->historyText();
+        QVERIFY(m_session->sendInput(QStringLiteral("read")));
+        QTRY_COMPARE(received(), QByteArray{"unreadread"});
+        QTRY_VERIFY(m_session->historyText() != activeHistory);
+        QVERIFY(!m_session->hasUnreadOutput());
+        model->setCurrentIndex(1);
+        QTRY_COMPARE(label->property("color").value<QColor>(), normalColor);
+    }
+
+    void singleTabBarVisibility_data()
+    {
+        QTest::addColumn<bool>("bottom");
+        QTest::newRow("top") << false;
+        QTest::newRow("bottom") << true;
+    }
+
+    void singleTabBarVisibility()
+    {
+        QFETCH(bool, bottom);
+        m_settings->setConfirmCloseRunning(false);
+        m_settings->setTabBarAtBottom(bottom);
+        m_settings->setAutoHideTabBar(false);
+        auto *model = m_windows->sessions(m_window);
+        auto *bar = qobject_cast<QQuickItem *>(optionObject(m_window, QStringLiteral("terminalToolBar")));
+        auto *action = optionObject(m_window, QStringLiteral("autoHideTabBarAction"));
+        QVERIFY(bar && action);
+        QTRY_VERIFY(bar->isVisible() && bar->height() > 0);
+        QTest::qWait(50);
+        const qreal visibleHeight = m_view->height();
+        QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
+        QTRY_VERIFY(m_settings->autoHideTabBar());
+        QTRY_VERIFY(!bar->isVisible());
+        QTRY_VERIFY(m_view->height() > visibleHeight);
+        QTRY_VERIFY(m_view->hasActiveFocus());
+        // The normal Mac shortcuts must still create and close tabs with no tab bar.
+        nativeKey(17, QStringLiteral("t"), QStringLiteral("t"), Qt::ControlModifier);
+        QTRY_COMPARE(model->count(), 2);
+        QTRY_VERIFY(bar->isVisible());
+        const auto barTop = bar->mapToScene(QPointF{}).y();
+        const auto terminalTop = m_view->mapToScene(QPointF{}).y();
+        if (bottom)
+            QVERIFY(barTop >= terminalTop + m_view->height() - 1);
+        else
+            QVERIFY(terminalTop >= barTop + bar->height() - 1);
+        screenshot(QStringLiteral("auto-hide-two-tabs-%1").arg(bottom));
+        nativeKey(13, QStringLiteral("w"), QStringLiteral("w"), Qt::ControlModifier);
+        QTRY_COMPARE(model->count(), 1);
+        QTRY_COMPARE(model->currentSession(), m_session);
+        QTRY_VERIFY(!bar->isVisible());
+        QTRY_VERIFY(m_view->hasActiveFocus());
+        QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
+        QTRY_VERIFY(!m_settings->autoHideTabBar());
+        QTRY_VERIFY(bar->isVisible());
+        QTRY_VERIFY(qFuzzyCompare(m_view->height(), visibleHeight));
+    }
+
+    void recentTabKeyboardTraversal()
+    {
+        QVERIFY(addSleepingTabs(3));
+        auto *sessions = m_windows->sessions(m_window);
+        // Make the recent-use order 0, 1, 2, independent of tab insertion order.
+        sessions->setCurrentIndex(2);
+        sessions->setCurrentIndex(1);
+        sessions->setCurrentIndex(0);
+        QQmlEngine engine;
+        QQmlComponent component{&engine};
+        component.setData("import org.kde.kirigami.actioncollection as AC\nAC.ActionModel { collectionName: 'org.kde.kwi.tabs' }", QUrl{});
+        std::unique_ptr<QObject> object{component.create()};
+        QVERIFY2(object, qPrintable(component.errorString()));
+        auto *editor = qobject_cast<QAbstractItemModel *>(object.get());
+        QVERIFY(editor);
+        const auto roles = editor->roleNames();
+        const int descriptionRole = roles.key("actionDescription", -1);
+        const int shortcutRole = roles.key("shortcut", -1);
+        QVERIFY(descriptionRole >= 0 && shortcutRole >= 0);
+        const auto indexFor = [&](const QString &name) {
+            for (int row{0}; row < editor->rowCount(); ++row) {
+                const auto index = editor->index(row, 0);
+                auto *description = editor->data(index, descriptionRole).value<QObject *>();
+                if (description && description->property("name").toString() == name)
+                    return index;
+            }
+            return QModelIndex{};
+        };
+        const auto forward = indexFor(QStringLiteral("last_used_tab"));
+        const auto reverse = indexFor(QStringLiteral("last_used_tab_reverse"));
+        QVERIFY(forward.isValid() && reverse.isValid());
+        const auto originalForward = editor->data(forward, shortcutRole);
+        const auto originalReverse = editor->data(reverse, shortcutRole);
+        const auto restore = qScopeGuard([&] {
+            postMacTestModifiers(m_window, 59, Qt::NoModifier);
+            QTest::qWait(25);
+            editor->setData(forward, originalForward, shortcutRole);
+            editor->setData(reverse, originalReverse, shortcutRole);
+            QMetaObject::invokeMethod(editor, "save");
+        });
+        // Qt's Meta modifier is the physical Control key on macOS. Bind explicitly
+        // because Zirq preserves its existing Mac defaults instead of stealing Tab.
+        const QKeySequence forwardKeys{QStringLiteral("Meta+Tab"), QKeySequence::PortableText};
+        const QKeySequence reverseKeys{QStringLiteral("Meta+Shift+Tab"), QKeySequence::PortableText};
+        QVERIFY(editor->setData(forward, forwardKeys.toString(QKeySequence::NativeText), shortcutRole));
+        QVERIFY(editor->setData(reverse, reverseKeys.toString(QKeySequence::NativeText), shortcutRole));
+        QVERIFY(QMetaObject::invokeMethod(editor, "save"));
+        auto *collection = KirigamiActions::ActionCollections::self()->collection(QStringLiteral("org.kde.kwi.tabs"));
+        QVERIFY(collection);
+        QTRY_COMPARE(collection->action(QStringLiteral("last_used_tab"))->shortcut(), forwardKeys);
+        m_view->forceActiveFocus();
+        postMacTestModifiers(m_window, 59, Qt::MetaModifier);
+        QTest::qWait(25);
+        nativeKey(48, QStringLiteral("\t"), QStringLiteral("\t"), Qt::MetaModifier);
+        QTRY_COMPARE(sessions->currentIndex(), 1);
+        nativeKey(48, QStringLiteral("\t"), QStringLiteral("\t"), Qt::MetaModifier);
+        QTRY_COMPARE(sessions->currentIndex(), 2);
+        postMacTestModifiers(m_window, 56, Qt::MetaModifier | Qt::ShiftModifier);
+        nativeKey(48, QStringLiteral("\t"), QStringLiteral("\t"), Qt::MetaModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(sessions->currentIndex(), 1);
+        postMacTestModifiers(m_window, 56, Qt::MetaModifier);
+        nativeKey(48, QStringLiteral("\t"), QStringLiteral("\t"), Qt::MetaModifier);
+        QTRY_COMPARE(sessions->currentIndex(), 2);
+        postMacTestModifiers(m_window, 59, Qt::NoModifier);
+        QTest::qWait(25);
+        // Releasing Control commits tab 2 as most recent. The next cycle starts
+        // with tab 0, rather than resuming the old traversal or toggling 1 and 2.
+        postMacTestModifiers(m_window, 59, Qt::MetaModifier);
+        nativeKey(48, QStringLiteral("\t"), QStringLiteral("\t"), Qt::MetaModifier);
+        QTRY_COMPARE(sessions->currentIndex(), 0);
+        nativeKey(48, QStringLiteral("\t"), QStringLiteral("\t"), Qt::MetaModifier);
+        QTRY_COMPARE(sessions->currentIndex(), 1);
+        postMacTestModifiers(m_window, 56, Qt::MetaModifier | Qt::ShiftModifier);
+        nativeKey(48, QStringLiteral("\t"), QStringLiteral("\t"), Qt::MetaModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(sessions->currentIndex(), 0);
+        postMacTestModifiers(m_window, 59, Qt::NoModifier);
+        QTest::qWait(25);
+        QTRY_VERIFY(m_view->hasActiveFocus());
+        QCOMPARE(received(), QByteArray{});
     }
 
     void bidirectionalText()
@@ -558,7 +810,10 @@ private Q_SLOTS:
             QStringList combos;
             QStringList spins;
             if (module == QLatin1String("appearance")) {
-                checkboxes = {QStringLiteral("systemFontSetting"), QStringLiteral("backgroundBlurSetting"), QStringLiteral("showTabStatusIconsSetting")};
+                checkboxes = {QStringLiteral("systemFontSetting"),
+                              QStringLiteral("backgroundBlurSetting"),
+                              QStringLiteral("showTabStatusIconsSetting"),
+                              QStringLiteral("autoHideTabBarSetting")};
                 combos = {QStringLiteral("fontFamilySetting"), QStringLiteral("colorSchemeSelector"), QStringLiteral("tabBarPositionSetting")};
                 spins = {QStringLiteral("fontSizeSetting")};
             } else if (module == QLatin1String("behavior")) {

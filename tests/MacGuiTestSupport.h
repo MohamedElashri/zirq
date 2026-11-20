@@ -18,6 +18,7 @@ void postMacTestKey(QWindow *window,
                     const QString &unmodifiedText,
                     bool release = false,
                     bool capsLock = false);
+void postMacTestModifiers(QWindow *window, unsigned short keyCode, Qt::KeyboardModifiers modifiers);
 void setMacTestPreedit(QWindow *window, const QString &text);
 void commitMacTestText(QWindow *window, const QString &text);
 QJsonObject macTestAccessibility(QWindow *window);

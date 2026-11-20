@@ -36,6 +36,7 @@
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <QScreen>
+#include <QScopeGuard>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
@@ -304,6 +305,14 @@ private Q_SLOTS:
     void glyphCaches()
     {
         QVERIFY(Kwi::traceEnabled());
+        // Keep the 220x60 terminal workload, font and display conditions. Hide
+        // the single-tab toolbar so window chrome does not consume a grid row
+        // on smaller displays; this fixture measures the terminal's glyph caches.
+        const bool originalAutoHide = m_settings->autoHideTabBar();
+        m_settings->setAutoHideTabBar(true);
+        const auto restore = qScopeGuard([&] {
+            m_settings->setAutoHideTabBar(originalAutoHide);
+        });
         Kwi::WindowManager windows{m_settings.get(), m_presets.get(), m_palettes.get()};
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
@@ -312,6 +321,7 @@ private Q_SLOTS:
         QVERIFY(window && activateMacTestWindow(window, 10000));
         auto *session = windows.sessions(window)->currentSession();
         auto *view = window->findChild<Kwi::TerminalView *>();
+        QVERIFY(!window->property("tabBarVisible").toBool());
         QVERIFY(view && fit(window, session, 220, 60));
         view->forceActiveFocus();
         GhosttyQt::Frame identity;
@@ -395,6 +405,9 @@ private Q_SLOTS:
                 {QStringLiteral("before_blink"), beforeBlink},
                 {QStringLiteral("after_blink"), afterBlink},
                 {QStringLiteral("resizes"), 10},
+                {QStringLiteral("grid_columns"), 220},
+                {QStringLiteral("grid_rows"), 60},
+                {QStringLiteral("tab_bar_visible"), window->property("tabBarVisible").toBool()},
                 {QStringLiteral("dpr"), window->effectiveDevicePixelRatio()}});
         touch(directory.filePath(QStringLiteral("stop")));
         windows.sessions(window)->closeAll(true);
