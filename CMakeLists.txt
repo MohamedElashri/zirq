@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 cmake_minimum_required(VERSION 3.28)
-project(zirq VERSION 0.3.0 LANGUAGES C CXX)
+project(zirq VERSION 0.3.1 LANGUAGES C CXX)
 
 if(APPLE)
     enable_language(OBJCXX)
