@@ -52,8 +52,10 @@ class CaskAutomationTest(unittest.TestCase):
         self.root = Path(directory.name)
         self.path = self.root / "Casks/zirq.rb"
         self.path.parent.mkdir()
-        self.path.write_text((ROOT / "Casks/zirq.rb").read_text())
         self.updater = load("update-cask")
+        # The live cask may already be newer than the mocked release during sync checks.
+        self.path.write_text(self.updater.render("v0.2.0", "b" * 64 + "  Zirq-arm64.zip\n",
+                                                 (ROOT / "Casks/zirq.rb").read_text()))
         self.calls = []
         self.release = {"tag_name": "v0.3.0", "draft": False, "prerelease": False}
         self.signed = True
