@@ -13,6 +13,21 @@ import org.kde.kirigamiaddons.formcard as FormCard
 FormCard.AboutPage {
     id: root
 
+    required property Controls.Action tipAction
+
+    header: Controls.ToolBar {
+        contentItem: RowLayout {
+            Item { Layout.fillWidth: true }
+            Controls.Button {
+                objectName: "aboutTipButton"
+                action: root.tipAction
+                icon.name: "favorite"
+                highlighted: true
+                Layout.margins: Kirigami.Units.smallSpacing
+            }
+        }
+    }
+
     // The upstream library delegates eagerly lay out every license, including
     // hidden dialogs. Keep one shared viewer and populate it only on request.
     showLibraries: false
@@ -24,7 +39,7 @@ FormCard.AboutPage {
     FormCard.FormCard {
         FormCard.FormButtonDelegate {
             text: KI18n.i18nc("@action:button", "Project website")
-            onClicked: Qt.openUrlExternally("https://melashri.net/soft/zirq/")
+            onClicked: Qt.openUrlExternally("https://melashri.net/software/zirq/")
         }
         FormCard.FormButtonDelegate {
             text: KI18n.i18nc("@action:button", "Source code")
@@ -103,13 +118,6 @@ FormCard.AboutPage {
                     }
                 }
             }
-        }
-    }
-
-    FormCard.FormCard {
-        FormCard.FormButtonDelegate {
-            text: KI18n.i18nc("@action:button", "Support on Ko-fi")
-            onClicked: Qt.openUrlExternally("https://ko-fi.com/melashri")
         }
     }
 

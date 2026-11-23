@@ -7,6 +7,8 @@ SPDX-License-Identifier: CC0-1.0
 
 A fast terminal for macOS, with Arabic, Persian and Hebrew support.
 
+[![Leave a tip on Ko-fi](https://img.shields.io/badge/Ko--fi-Leave%20a%20tip-913F51?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/melashri)
+
 [![CI](https://github.com/MohamedElashri/zirq/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/MohamedElashri/zirq/actions/workflows/checks.yml)
 [![Release](https://img.shields.io/github/v/release/MohamedElashri/zirq)](https://github.com/MohamedElashri/zirq/releases)
 
@@ -53,8 +55,14 @@ Fonts, colors, Option-as-Alt, and bidirectional rendering are configurable in se
 
 Built on [KDE Kwi](https://invent.kde.org/utilities/kwi), Qt Quick, KDE Frameworks,
 and libghostty-vt, with independent development and releases.
-[Development](Development.md) · [Issues](https://github.com/MohamedElashri/zirq/issues) · [Licenses](LICENSES/)
+[Development](Development.md) · [Issues](https://github.com/MohamedElashri/zirq/issues)
 
 ## Support
 
-Visit the [project website](https://melashri.net/soft/zirq/) for downloads and links. [Support on Ko-fi](https://ko-fi.com/melashri) if you’d like to leave an optional tip.
+Tips are optional and help maintain the project.
+
+**[Leave a tip on Ko-fi](https://ko-fi.com/melashri)** · [Project website](https://melashri.net/software/zirq/)
+
+## License
+
+See [LICENSES](LICENSES/) for the license texts.

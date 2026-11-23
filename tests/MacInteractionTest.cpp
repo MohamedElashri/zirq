@@ -926,6 +926,12 @@ private Q_SLOTS:
             if (name == QLatin1String("aboutDialog")) {
                 QVERIFY(surface()->grabWindow().save(QDir{qEnvironmentVariable("KWI_PERF_OUTPUT")}.filePath(QStringLiteral("about-libraries.png"))));
                 auto *page = optionObject(surface(), QStringLiteral("aboutPage"));
+                QVERIFY(page);
+                auto *tip = qobject_cast<QQuickItem *>(optionObject(page, QStringLiteral("aboutTipButton")));
+                auto *flickable = page->property("flickable").value<QQuickItem *>();
+                QVERIFY(tip && tip->isVisible());
+                QVERIFY(flickable);
+                QVERIFY(!flickable->isAncestorOf(tip));
                 auto *license = optionObject(page, QStringLiteral("libraryLicenseDialog"));
                 QVERIFY(license && license->property("licenseText").toString().isEmpty());
                 auto *button = optionObject(page, QStringLiteral("libraryLicenseButton_"), true);

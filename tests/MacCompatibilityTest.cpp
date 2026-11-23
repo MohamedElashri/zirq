@@ -605,7 +605,7 @@ private Q_SLOTS:
         QCOMPARE(about.displayName(), QStringLiteral("Zirq"));
         QCOMPARE(about.componentName(), QStringLiteral("zirq"));
         QCOMPARE(about.desktopFileName(), QStringLiteral("com.elashri.zirq"));
-        QCOMPARE(about.homepage(), QStringLiteral("https://melashri.net/soft/zirq/"));
+        QCOMPARE(about.homepage(), QStringLiteral("https://melashri.net/software/zirq/"));
         QCOMPARE(about.bugAddress(), QStringLiteral("https://github.com/MohamedElashri/zirq/issues"));
         QVERIFY(!about.programLogo().value<QIcon>().isNull());
         Kwi::Session session;
