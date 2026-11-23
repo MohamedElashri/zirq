@@ -54,6 +54,12 @@ Kirigami.ApplicationWindow {
         onTriggered: settingsView.configViewItem.close()
     }
 
+    Controls.Action {
+        id: tipAction
+        text: KI18n.i18nc("@action:button", "Leave a tip on Ko-fi")
+        onTriggered: Qt.openUrlExternally("https://ko-fi.com/melashri")
+    }
+
     Component {
         id: macMenuBar
         Controls.MenuBar {
@@ -90,6 +96,11 @@ Kirigami.ApplicationWindow {
                 Controls.MenuItem { Kirigami.MnemonicData.enabled: false; action: nextTabAction }
                 Controls.MenuItem { Kirigami.MnemonicData.enabled: false; action: previousTabAction }
                 Controls.MenuItem { Kirigami.MnemonicData.enabled: false; action: detachTabAction }
+            }
+            Controls.Menu {
+                title: KI18n.i18nc("@title:menu", "Help")
+                Controls.MenuItem { Kirigami.MnemonicData.enabled: false; action: aboutAction }
+                Controls.MenuItem { Kirigami.MnemonicData.enabled: false; action: tipAction }
             }
         }
     }
@@ -2032,6 +2043,8 @@ Kirigami.ApplicationWindow {
         pageFactory: () => Qt.platform.os === "osx"
             ? Qt.createComponent("org.kde.kwi", "ZirqAboutPage")
             : Qt.createComponent("org.kde.kirigamiaddons.formcard", "AboutPage")
-        initialProperties: ({ objectName: "aboutPage", getInvolvedUrl: "", donateUrl: "" })
+        initialProperties: Qt.platform.os === "osx"
+            ? ({ objectName: "aboutPage", getInvolvedUrl: "", donateUrl: "", tipAction: tipAction })
+            : ({ objectName: "aboutPage", getInvolvedUrl: "", donateUrl: "" })
     }
 }

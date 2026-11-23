@@ -22,7 +22,7 @@ KAboutData applicationAboutData()
     about.setOtherText(
         i18n("A terminal workspace for macOS, built on KDE Kwi.\n"
              "Releases and support are provided by the Zirq project."));
-    about.setHomepage(QStringLiteral("https://melashri.net/soft/zirq/"));
+    about.setHomepage(QStringLiteral("https://melashri.net/software/zirq/"));
     about.setBugAddress(QByteArrayLiteral("https://github.com/MohamedElashri/zirq/issues"));
     about.setOrganizationDomain(QByteArrayLiteral(KWI_ORGANIZATION_DOMAIN));
     about.setDesktopFileName(QStringLiteral(KWI_APP_ID));
