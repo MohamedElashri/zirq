@@ -24,6 +24,11 @@
   <provides><binary>@KWI_EXECUTABLE@</binary></provides>
   <translation type="gettext">kwi</translation>
   <releases>
+    <release version="0.3.2" date="2026-11-23" type="stable">
+      <description>
+        <p>Refresh About with project links and an optional Ko-fi tip link.</p>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-11-20" type="stable">
       <description>
         <p>Integrate KDE Kwi upstream fixes and improvements, including rendering, tabs, selection, and terminal session handling. Update libghostty-vt to 1.0.1 while preserving existing Zirq settings and bidirectional text support.</p>

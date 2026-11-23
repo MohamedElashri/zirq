@@ -54,3 +54,7 @@ Fonts, colors, Option-as-Alt, and bidirectional rendering are configurable in se
 Built on [KDE Kwi](https://invent.kde.org/utilities/kwi), Qt Quick, KDE Frameworks,
 and libghostty-vt, with independent development and releases.
 [Development](Development.md) · [Issues](https://github.com/MohamedElashri/zirq/issues) · [Licenses](LICENSES/)
+
+## Support
+
+Visit the [project website](https://melashri.net/soft/zirq/) for downloads and links. [Support on Ko-fi](https://ko-fi.com/melashri) if you’d like to leave an optional tip.

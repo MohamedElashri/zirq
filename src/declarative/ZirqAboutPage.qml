@@ -18,6 +18,29 @@ FormCard.AboutPage {
     showLibraries: false
 
     FormCard.FormHeader {
+        title: KI18n.i18nc("@title:group", "Project links")
+    }
+
+    FormCard.FormCard {
+        FormCard.FormButtonDelegate {
+            text: KI18n.i18nc("@action:button", "Project website")
+            onClicked: Qt.openUrlExternally("https://melashri.net/soft/zirq/")
+        }
+        FormCard.FormButtonDelegate {
+            text: KI18n.i18nc("@action:button", "Source code")
+            onClicked: Qt.openUrlExternally("https://github.com/MohamedElashri/zirq")
+        }
+        FormCard.FormButtonDelegate {
+            text: KI18n.i18nc("@action:button", "Report an issue")
+            onClicked: Qt.openUrlExternally("https://github.com/MohamedElashri/zirq/issues")
+        }
+        FormCard.FormButtonDelegate {
+            text: KI18n.i18nc("@action:button", "Release notes")
+            onClicked: Qt.openUrlExternally("https://github.com/MohamedElashri/zirq/releases")
+        }
+    }
+
+    FormCard.FormHeader {
         title: KI18n.i18nd("kirigami-addons6", "Libraries in use")
         actions: Kirigami.Action {
             text: KI18n.i18ndc("kirigami-addons6", "@action:button", "Copy to Clipboard")
@@ -80,6 +103,13 @@ FormCard.AboutPage {
                     }
                 }
             }
+        }
+    }
+
+    FormCard.FormCard {
+        FormCard.FormButtonDelegate {
+            text: KI18n.i18nc("@action:button", "Support on Ko-fi")
+            onClicked: Qt.openUrlExternally("https://ko-fi.com/melashri")
         }
     }
 
