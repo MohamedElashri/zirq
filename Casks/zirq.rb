@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: CC0-1.0
 
 cask "zirq" do
-  version "0.3.1"
-  sha256 "37aa7b501b827e58f6cd646a4b86341319df946ed6fe33dc914f54b91ee9930b"
+  version "0.3.2"
+  sha256 "cd17c08d3cdc0b68edd3ffdd7a11f28655d44a1648414c13ef08b732056cfdc8"
 
   url "https://github.com/MohamedElashri/zirq/releases/download/v#{version}/Zirq-arm64.zip"
   name "Zirq"
